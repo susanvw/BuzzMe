@@ -1,0 +1,87 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "BuzzMe.sln"
+      - "global.json"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "BuzzMe.sln"
+      - "global.json"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore BuzzMe.sln
+
+      # DEVELOPMENT_GUIDE.md §9/§10 are enforced as build warnings today
+      # (Nullable, ImplicitUsings); promote to -warnaserror once the codebase
+      # has enough real code for that to be a meaningful gate, not a blocker
+      # on day one.
+      - name: Build
+        run: dotnet build BuzzMe.sln --no-restore --configuration Release
+
+      - name: Unit + Application tests
+        run: >
+          dotnet test BuzzMe.sln --no-build --configuration Release
+          --filter "FullyQualifiedName!~IntegrationTests"
+          --logger "trx" --results-directory ./test-results
+
+      # Infrastructure and Api integration tests spin up real MongoDB via
+      # Testcontainers (DEVELOPMENT_GUIDE.md §8) — Docker is available on
+      # GitHub-hosted ubuntu-latest runners by default, no extra service needed.
+      - name: Integration tests
+        run: >
+          dotnet test BuzzMe.sln --no-build --configuration Release
+          --filter "FullyQualifiedName~IntegrationTests"
+          --logger "trx" --results-directory ./test-results
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: ./test-results
+
+  publish:
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Environment configuration and secrets (Mongo connection string, Jwt
+      # signing key, push/email/SMS provider credentials) are supplied at
+      # deploy time via the hosting platform's own secret store — never
+      # committed, never baked into the published artifact
+      # (DEVELOPMENT_GUIDE.md §9's Configuration/Secrets standard).
+      - name: Publish BuzzMe.Api
+        run: dotnet publish src/BuzzMe.Api/BuzzMe.Api.csproj --configuration Release --output ./publish/api
+
+      - name: Publish BuzzMe.Workers
+        run: dotnet publish src/BuzzMe.Workers/BuzzMe.Workers.csproj --configuration Release --output ./publish/workers
+
+      - name: Upload publish artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-publish
+          path: ./publish

@@ -1,0 +1,16 @@
+{
+  "name": "@buzzme/domain-constants",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The fixed enums that exist because BuzzMe is deliberately simple — recurrence options, notify presets, error codes. Shared so apps/web and apps/mobile can never drift on what counts as a valid value (DEVELOPMENT_GUIDE.md §1).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

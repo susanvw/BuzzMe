@@ -1,0 +1,19 @@
+{
+  "name": "buzzme",
+  "private": true,
+  "version": "0.0.0",
+  "description": "BuzzMe — a shared reminder app. Monorepo root: see DEVELOPMENT_GUIDE.md §1.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

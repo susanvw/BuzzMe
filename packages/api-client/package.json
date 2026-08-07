@@ -1,0 +1,19 @@
+{
+  "name": "@buzzme/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "One TypeScript client for the whole /v1 surface (API_CONTRACT.md), shared by apps/web and apps/mobile so neither drifts from the documented contract. Envelope types and a generic fetch wrapper only — no per-resource endpoint calls yet (DEVELOPMENT_GUIDE.md §1).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@buzzme/domain-constants": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

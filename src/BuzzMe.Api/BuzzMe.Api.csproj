@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\BuzzMe.Application\BuzzMe.Application.csproj" />
+    <ProjectReference Include="..\BuzzMe.Contracts\BuzzMe.Contracts.csproj" />
+    <ProjectReference Include="..\BuzzMe.Infrastructure\BuzzMe.Infrastructure.csproj" />
+    <ProjectReference Include="..\BuzzMe.Domain\BuzzMe.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
