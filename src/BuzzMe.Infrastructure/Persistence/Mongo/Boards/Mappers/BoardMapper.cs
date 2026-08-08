@@ -18,6 +18,7 @@ internal static class BoardMapper
     {
         UserId = membership.UserId,
         Role = membership.Role.ToString(),
+        Muted = membership.Muted,
     };
 
     public static Board ToDomain(BoardDocument document) => Board.Rehydrate(
@@ -28,5 +29,5 @@ internal static class BoardMapper
         document.Version);
 
     private static Membership ToDomain(MembershipDocument document) =>
-        new(document.UserId, Enum.Parse<MembershipRole>(document.Role));
+        new(document.UserId, Enum.Parse<MembershipRole>(document.Role), document.Muted);
 }

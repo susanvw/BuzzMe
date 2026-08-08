@@ -7,7 +7,7 @@ using FluentValidation;
 
 namespace BuzzMe.Api.Endpoints;
 
-/// <summary>API_CONTRACT.md §5 — Board APIs, exactly: Create, Get, List. No additional endpoints.</summary>
+/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, and (Sprint 7) Mute/Unmute.</summary>
 public static class BoardEndpoints
 {
     public static IEndpointRouteBuilder MapBoardEndpoints(this IEndpointRouteBuilder app)
@@ -17,6 +17,8 @@ public static class BoardEndpoints
         group.MapPost("", CreateBoardAsync);
         group.MapGet("/{boardId:guid}", GetBoardAsync);
         group.MapGet("", ListBoardsAsync);
+        group.MapPost("/{boardId:guid}/mute", MuteBoardAsync);
+        group.MapPost("/{boardId:guid}/unmute", UnmuteBoardAsync);
 
         return app;
     }
@@ -81,5 +83,31 @@ public static class BoardEndpoints
         }
 
         return Results.Json(result.Value.ToListResponse(), statusCode: StatusCodes.Status200OK);
+    }
+
+    private static async Task<IResult> MuteBoardAsync(
+        Guid boardId, BoardApplicationService boardService, ICurrentUserContext currentUser, CancellationToken cancellationToken)
+    {
+        var result = await boardService.MuteBoardAsync(currentUser.UserId, boardId, cancellationToken);
+        if (result.IsFailure)
+        {
+            var (statusCode, apiError) = result.Error.ToHttp();
+            return Results.Json(new ApiResponse<object>(null, apiError), statusCode: statusCode);
+        }
+
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> UnmuteBoardAsync(
+        Guid boardId, BoardApplicationService boardService, ICurrentUserContext currentUser, CancellationToken cancellationToken)
+    {
+        var result = await boardService.UnmuteBoardAsync(currentUser.UserId, boardId, cancellationToken);
+        if (result.IsFailure)
+        {
+            var (statusCode, apiError) = result.Error.ToHttp();
+            return Results.Json(new ApiResponse<object>(null, apiError), statusCode: statusCode);
+        }
+
+        return Results.NoContent();
     }
 }

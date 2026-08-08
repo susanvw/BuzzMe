@@ -107,6 +107,86 @@ public sealed class BoardEndpointsTests : IClassFixture<BuzzMeApiFactory>
         Assert.Equal(ErrorCode.ValidationError, body?.Error?.Code);
     }
 
+    [Fact]
+    public async Task MuteBoard_ReturnsNoContent()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(client, "Family");
+
+        var response = await client.PostAsync($"/v1/boards/{created.Id}/mute", content: null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task MuteBoard_CalledAgain_IsStillNoContent()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(client, "Family");
+        await client.PostAsync($"/v1/boards/{created.Id}/mute", content: null);
+
+        var response = await client.PostAsync($"/v1/boards/{created.Id}/mute", content: null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task MuteBoard_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.PostAsync($"/v1/boards/{created.Id}/mute", content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task MuteBoard_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync($"/v1/boards/{Guid.CreateVersion7()}/mute", content: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnmuteBoard_ReturnsNoContent()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(client, "Family");
+        await client.PostAsync($"/v1/boards/{created.Id}/mute", content: null);
+
+        var response = await client.PostAsync($"/v1/boards/{created.Id}/unmute", content: null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnmuteBoard_WithoutHavingMuted_IsStillNoContent()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(client, "Family");
+
+        var response = await client.PostAsync($"/v1/boards/{created.Id}/unmute", content: null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnmuteBoard_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.PostAsync($"/v1/boards/{created.Id}/unmute", content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     private static async Task<BoardResponse> CreateBoardAsync(HttpClient client, string name)
     {
         var response = await client.PostAsJsonAsync("/v1/boards", new CreateBoardRequest(name));

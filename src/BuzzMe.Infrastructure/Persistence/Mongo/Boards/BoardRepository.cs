@@ -50,7 +50,16 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
     {
         var filter = Builders<BoardDocument>.Filter.Eq(d => d.Id, boardId.Value);
         var update = Builders<BoardDocument>.Update.Push(
-            d => d.Memberships, new MembershipDocument { UserId = userId, Role = MembershipRole.Member.ToString() });
+            d => d.Memberships, new MembershipDocument { UserId = userId, Role = MembershipRole.Member.ToString(), Muted = false });
+
+        await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+    }
+
+    public async Task SetMembershipMutedAsync(BoardId boardId, Guid userId, bool muted, CancellationToken cancellationToken)
+    {
+        var filter = Builders<BoardDocument>.Filter.Eq(d => d.Id, boardId.Value)
+            & Builders<BoardDocument>.Filter.ElemMatch(d => d.Memberships, m => m.UserId == userId);
+        var update = Builders<BoardDocument>.Update.Set("Memberships.$.Muted", muted);
 
         await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
     }

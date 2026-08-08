@@ -52,4 +52,44 @@ public sealed class BoardApplicationService(IBoardRepository boardRepository, II
 
         return Result.Success(new PagedResult<BoardResult>(results, nextCursor));
     }
+
+    /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.4 — Authorization: Board Member, acting only on their
+    /// own Membership, never another person's — there is no target-user parameter by
+    /// design. Idempotent: setting an already-current mute state is a no-op (§3.4's own
+    /// stated rule) — checked here, before touching the aggregate or the database, same
+    /// pattern as every other idempotent write in this codebase.
+    /// </summary>
+    public async Task<Result> MuteBoardAsync(Guid requestingUserId, Guid boardId, CancellationToken cancellationToken)
+    {
+        var board = await boardRepository.GetByIdAsync(new BoardId(boardId), cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure(Error.NotFound("Board not found."));
+
+        var membership = board.Memberships.First(m => m.UserId == requestingUserId);
+        if (membership.Muted)
+            return Result.Success();
+
+        board.MuteBoard(requestingUserId, clock.UtcNow);
+        await boardRepository.SetMembershipMutedAsync(board.Id, requestingUserId, muted: true, cancellationToken);
+
+        return Result.Success();
+    }
+
+    /// <summary>Reverses MuteBoardAsync — same authorization and idempotency rules.</summary>
+    public async Task<Result> UnmuteBoardAsync(Guid requestingUserId, Guid boardId, CancellationToken cancellationToken)
+    {
+        var board = await boardRepository.GetByIdAsync(new BoardId(boardId), cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure(Error.NotFound("Board not found."));
+
+        var membership = board.Memberships.First(m => m.UserId == requestingUserId);
+        if (!membership.Muted)
+            return Result.Success();
+
+        board.UnmuteBoard(requestingUserId, clock.UtcNow);
+        await boardRepository.SetMembershipMutedAsync(board.Id, requestingUserId, muted: false, cancellationToken);
+
+        return Result.Success();
+    }
 }

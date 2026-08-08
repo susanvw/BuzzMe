@@ -94,6 +94,100 @@ public sealed class BoardTests
         Assert.Single(board.DomainEvents.OfType<MembershipGranted>());
     }
 
+    [Fact]
+    public void MuteBoard_SetsMutedOnTheGivenMembersOwnMembership()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var otherMemberUserId = Guid.CreateVersion7();
+        board.GrantMembership(otherMemberUserId, Now);
+
+        board.MuteBoard(otherMemberUserId, Now);
+
+        Assert.True(board.Memberships.Single(m => m.UserId == otherMemberUserId).Muted);
+        Assert.False(board.Memberships.Single(m => m.UserId == ownerUserId).Muted);
+    }
+
+    [Fact]
+    public void MuteBoard_RaisesBoardMuted()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(boardId, new BoardName("Family"), ownerUserId, Now);
+
+        board.MuteBoard(ownerUserId, Now);
+
+        var raised = Assert.Single(board.DomainEvents.OfType<BoardMuted>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal(ownerUserId, raised.UserId);
+    }
+
+    [Fact]
+    public void MuteBoard_IsIdempotentWhenAlreadyMuted()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        board.MuteBoard(ownerUserId, Now);
+
+        board.MuteBoard(ownerUserId, Now);
+
+        Assert.Single(board.DomainEvents.OfType<BoardMuted>());
+    }
+
+    [Fact]
+    public void MuteBoard_ThrowsForSomeoneWhoIsNotAMember()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        Assert.Throws<InvalidOperationException>(() => board.MuteBoard(Guid.CreateVersion7(), Now));
+    }
+
+    [Fact]
+    public void UnmuteBoard_ClearsMutedOnTheGivenMembersOwnMembership()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        board.MuteBoard(ownerUserId, Now);
+
+        board.UnmuteBoard(ownerUserId, Now);
+
+        Assert.False(board.Memberships.Single(m => m.UserId == ownerUserId).Muted);
+    }
+
+    [Fact]
+    public void UnmuteBoard_RaisesBoardUnmuted()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(boardId, new BoardName("Family"), ownerUserId, Now);
+        board.MuteBoard(ownerUserId, Now);
+
+        board.UnmuteBoard(ownerUserId, Now);
+
+        var raised = Assert.Single(board.DomainEvents.OfType<BoardUnmuted>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal(ownerUserId, raised.UserId);
+    }
+
+    [Fact]
+    public void UnmuteBoard_IsIdempotentWhenNotCurrentlyMuted()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+
+        board.UnmuteBoard(ownerUserId, Now);
+
+        Assert.Empty(board.DomainEvents.OfType<BoardUnmuted>());
+    }
+
+    [Fact]
+    public void UnmuteBoard_ThrowsForSomeoneWhoIsNotAMember()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        Assert.Throws<InvalidOperationException>(() => board.UnmuteBoard(Guid.CreateVersion7(), Now));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

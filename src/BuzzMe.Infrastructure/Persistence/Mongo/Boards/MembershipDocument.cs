@@ -6,4 +6,6 @@ public sealed class MembershipDocument
     public required Guid UserId { get; init; }
 
     public required string Role { get; init; }
+
+    public required bool Muted { get; init; }
 }

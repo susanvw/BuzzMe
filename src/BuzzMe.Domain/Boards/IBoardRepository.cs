@@ -22,4 +22,12 @@ public interface IBoardRepository
     /// naturally-atomic MongoDB array pushes on the same document.
     /// </summary>
     Task AddMemberAsync(BoardId boardId, Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sprint 7 — a targeted update of one Membership sub-document's `Muted` flag within
+    /// the array (MongoDB's positional `$` operator, matched by UserId), not a full
+    /// aggregate replace. Same no-Version-check reasoning as AddMemberAsync: two different
+    /// Users muting/unmuting concurrently are two independent, naturally-atomic updates.
+    /// </summary>
+    Task SetMembershipMutedAsync(BoardId boardId, Guid userId, bool muted, CancellationToken cancellationToken);
 }

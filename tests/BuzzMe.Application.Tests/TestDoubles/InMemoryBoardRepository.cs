@@ -40,4 +40,11 @@ public sealed class InMemoryBoardRepository : IBoardRepository
         // this. Same reasoning as InMemoryReminderRepository.MarkDeletedAsync.
         return Task.CompletedTask;
     }
+
+    public Task SetMembershipMutedAsync(BoardId boardId, Guid userId, bool muted, CancellationToken cancellationToken)
+    {
+        // No-op — same by-reference reasoning as AddMemberAsync: board.MuteBoard/UnmuteBoard
+        // already mutated the shared Membership instance before this is called.
+        return Task.CompletedTask;
+    }
 }

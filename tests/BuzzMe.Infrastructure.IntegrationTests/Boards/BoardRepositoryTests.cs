@@ -99,4 +99,49 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
         Assert.True(reloaded.HasMember(newMemberUserId));
         Assert.Equal(MembershipRole.Member, reloaded.Memberships.Single(m => m.UserId == newMemberUserId).Role);
     }
+
+    [Fact]
+    public async Task AddAsync_PersistsEveryMembershipAsUnmutedByDefault()
+    {
+        var creatorUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), creatorUserId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.False(reloaded.Memberships.Single().Muted);
+    }
+
+    [Fact]
+    public async Task SetMembershipMutedAsync_MutesOnlyTheGivenUsersOwnMembership()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+        var otherMemberUserId = Guid.CreateVersion7();
+        await _repository.AddMemberAsync(board.Id, otherMemberUserId, CancellationToken.None);
+
+        await _repository.SetMembershipMutedAsync(board.Id, otherMemberUserId, muted: true, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded.Memberships.Single(m => m.UserId == otherMemberUserId).Muted);
+        Assert.False(reloaded.Memberships.Single(m => m.UserId == ownerUserId).Muted);
+    }
+
+    [Fact]
+    public async Task SetMembershipMutedAsync_CanClearMutedBackToFalse()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+        await _repository.SetMembershipMutedAsync(board.Id, ownerUserId, muted: true, CancellationToken.None);
+
+        await _repository.SetMembershipMutedAsync(board.Id, ownerUserId, muted: false, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.False(reloaded.Memberships.Single(m => m.UserId == ownerUserId).Muted);
+    }
 }

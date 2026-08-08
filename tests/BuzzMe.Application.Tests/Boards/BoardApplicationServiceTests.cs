@@ -1,5 +1,6 @@
 using BuzzMe.Application.Boards;
 using BuzzMe.Application.Tests.TestDoubles;
+using BuzzMe.Domain.Boards;
 
 namespace BuzzMe.Application.Tests.Boards;
 
@@ -86,5 +87,90 @@ public sealed class BoardApplicationServiceTests
         var result = await _sut.ListBoardsAsync(userId, cursor: null, limit: 20, CancellationToken.None);
 
         Assert.Null(result.Value.NextCursor);
+    }
+
+    [Fact]
+    public async Task MuteBoardAsync_MutesTheRequestersOwnMembership()
+    {
+        var userId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+
+        var result = await _sut.MuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        Assert.True(board!.Memberships.Single(m => m.UserId == userId).Muted);
+    }
+
+    [Fact]
+    public async Task MuteBoardAsync_CalledAgain_IsIdempotent()
+    {
+        var userId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+        await _sut.MuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        var second = await _sut.MuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(second.IsSuccess);
+    }
+
+    [Fact]
+    public async Task MuteBoardAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var userId = Guid.CreateVersion7();
+        var strangerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+
+        var result = await _sut.MuteBoardAsync(strangerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task MuteBoardAsync_ReturnsNotFoundForABoardThatDoesNotExist()
+    {
+        var result = await _sut.MuteBoardAsync(Guid.CreateVersion7(), Guid.CreateVersion7(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task UnmuteBoardAsync_UnmutesTheRequestersOwnMembership()
+    {
+        var userId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+        await _sut.MuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        var result = await _sut.UnmuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        Assert.False(board!.Memberships.Single(m => m.UserId == userId).Muted);
+    }
+
+    [Fact]
+    public async Task UnmuteBoardAsync_CalledAgain_IsIdempotent()
+    {
+        var userId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+
+        var result = await _sut.UnmuteBoardAsync(userId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task UnmuteBoardAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var userId = Guid.CreateVersion7();
+        var strangerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(userId, "Family", CancellationToken.None);
+
+        var result = await _sut.UnmuteBoardAsync(strangerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
     }
 }
