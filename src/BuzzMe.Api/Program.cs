@@ -9,6 +9,7 @@ using BuzzMe.Application.Abstractions;
 using BuzzMe.Application.Boards;
 using BuzzMe.Application.Invitations;
 using BuzzMe.Application.Reminders;
+using BuzzMe.Application.Users;
 using BuzzMe.Infrastructure.DependencyInjection;
 using BuzzMe.Infrastructure.Persistence.Migrations;
 using FluentValidation;
@@ -68,6 +69,7 @@ builder.Services.AddBuzzMeInfrastructure(builder.Configuration);
 builder.Services.AddScoped<BoardApplicationService>();
 builder.Services.AddScoped<ReminderApplicationService>();
 builder.Services.AddScoped<InvitationApplicationService>();
+builder.Services.AddScoped<UserApplicationService>();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Liveness is Api-specific (it only asks "is the process up"), so it's registered here
@@ -98,6 +100,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 app.MapBoardEndpoints();
 app.MapReminderEndpoints();
 app.MapInvitationEndpoints();
+app.MapUserEndpoints();
 
 app.Run();
 

@@ -5,6 +5,7 @@ using BuzzMe.Domain.Invitations;
 using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
 using BuzzMe.Domain.SeedWork;
+using BuzzMe.Domain.Users;
 using BuzzMe.Infrastructure.Ids;
 using BuzzMe.Infrastructure.Messaging.Email;
 using BuzzMe.Infrastructure.Messaging.Notifications;
@@ -18,6 +19,7 @@ using BuzzMe.Infrastructure.Persistence.Mongo.Buzzes;
 using BuzzMe.Infrastructure.Persistence.Mongo.Invitations;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
+using BuzzMe.Infrastructure.Persistence.Mongo.Users;
 using BuzzMe.Infrastructure.Persistence.Outbox;
 using BuzzMe.Infrastructure.Time;
 using Microsoft.Extensions.Configuration;
@@ -49,6 +51,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IMongoMigration, CreateOccurrenceIndexes>();
         services.AddSingleton<IMongoMigration, CreateBuzzIndexes>();
         services.AddSingleton<IMongoMigration, CreateInvitationIndexes>();
+        services.AddSingleton<IMongoMigration, CreateUserIndexes>();
 
         // Default to logging instead of delivering until a real provider is wired up —
         // see NullPushNotificationSender/NullEmailSender/NullSmsSender for why this is
@@ -77,6 +80,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOccurrenceRepository, OccurrenceRepository>();
         services.AddScoped<IBuzzRepository, BuzzRepository>();
         services.AddScoped<IInvitationRepository, InvitationRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
 
         return services;
     }
