@@ -17,7 +17,12 @@ public static class BoardMapping
             new PaginationInfo(paged.NextCursor));
 
     public static MembershipResponse ToResponse(this MembershipResult result) =>
-        new(result.BoardId, result.UserId, result.Role);
+        new(result.BoardId, result.UserId, result.DisplayName, result.PhotoUrl, result.Role, result.Muted, result.JoinedAt);
+
+    public static ApiListResponse<MembershipResponse> ToListResponse(this PagedResult<MembershipResult> paged) =>
+        ApiListResponse<MembershipResponse>.Ok(
+            paged.Items.Select(item => item.ToResponse()).ToList(),
+            new PaginationInfo(paged.NextCursor));
 
     public static LeaveBoardResponse ToResponse(this LeaveBoardResult result) => new(result.ReassignedOwnerUserId);
 }

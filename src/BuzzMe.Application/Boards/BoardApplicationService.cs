@@ -57,6 +57,44 @@ public sealed class BoardApplicationService(
     }
 
     /// <summary>
+    /// API_CONTRACT.md §5/§7 — Authorization: Board Member; cursor-paginated, same shape as
+    /// ListBoardsAsync, just applied to an in-memory collection rather than a Mongo query —
+    /// a Board's Memberships are already loaded whole as part of the aggregate (DOMAIN_MODEL.md's
+    /// "family/team scale," never large enough to warrant a separate paginated query or a
+    /// batch User-lookup). Sorted/paginated by UserId, not JoinedAt, for the same reason
+    /// every other list endpoint in this codebase sorts by Id — a single stable, comparable
+    /// key that never repeats among Active Memberships on one Board. Removed/Left historical
+    /// rows are excluded — this lists current Members, not the Board's whole history.
+    /// </summary>
+    public async Task<Result<PagedResult<MembershipResult>>> ListMembersAsync(
+        Guid requestingUserId, Guid boardId, string? cursor, int limit, CancellationToken cancellationToken)
+    {
+        var board = await boardRepository.GetByIdAsync(new BoardId(boardId), cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure<PagedResult<MembershipResult>>(Error.NotFound("Board not found."));
+
+        Guid? afterId = Guid.TryParse(cursor, out var parsed) ? parsed : null;
+
+        var page = board.Memberships
+            .Where(m => m.Status == MembershipStatus.Active)
+            .OrderBy(m => m.UserId)
+            .Where(m => afterId is null || m.UserId.CompareTo(afterId.Value) > 0)
+            .Take(limit)
+            .ToList();
+
+        var results = new List<MembershipResult>(page.Count);
+        foreach (var membership in page)
+        {
+            var user = await userRepository.GetByIdAsync(new UserId(membership.UserId), cancellationToken);
+            results.Add(MembershipResult.FromDomain(board.Id, membership, user));
+        }
+
+        var nextCursor = page.Count == limit ? page[^1].UserId.ToString() : null;
+
+        return Result.Success(new PagedResult<MembershipResult>(results, nextCursor));
+    }
+
+    /// <summary>
     /// APPLICATION_LAYER_SPEC.md §3.4 — Authorization: Board Member, acting only on their
     /// own Membership, never another person's — there is no target-user parameter by
     /// design. Idempotent: setting an already-current mute state is a no-op (§3.4's own

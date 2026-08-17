@@ -28,6 +28,16 @@ public sealed class BoardApplicationServiceTests
         await _userRepository.AddAsync(user, CancellationToken.None);
     }
 
+    /// <summary>Seeds an Active User with the given DisplayName — ListMembersAsync's displayName/photoUrl fields need a real User record to look up.</summary>
+    private async Task SeedActiveUserAsync(Guid userId, string displayName)
+    {
+        var user = User.Register(
+            new UserId(userId), $"{Guid.CreateVersion7()}@example.com", null, "hashed-password", new DisplayName(displayName),
+            "123456", _clock.UtcNow.AddMinutes(15), _clock.UtcNow);
+        user.Verify(_clock.UtcNow);
+        await _userRepository.AddAsync(user, CancellationToken.None);
+    }
+
     [Fact]
     public async Task CreateBoardAsync_PersistsTheBoardWithTheCreatorAsOwner()
     {
@@ -361,6 +371,105 @@ public sealed class BoardApplicationServiceTests
     {
         var result = await _sut.RemoveMemberAsync(
             Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_ReturnsEveryActiveMemberWithTheirProfileFields()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        await SeedActiveUserAsync(ownerUserId, "Owner Person");
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        var otherUserId = Guid.CreateVersion7();
+        await SeedActiveUserAsync(otherUserId, "Other Person");
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        board!.GrantMembership(otherUserId, _clock.UtcNow);
+
+        var result = await _sut.ListMembersAsync(ownerUserId, created.Value.Id, cursor: null, limit: 20, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value.Items.Count);
+        var owner = result.Value.Items.Single(m => m.UserId == ownerUserId);
+        Assert.Equal("Owner Person", owner.DisplayName);
+        Assert.Equal("Owner", owner.Role);
+        Assert.False(owner.Muted);
+        Assert.Equal(_clock.UtcNow, owner.JoinedAt);
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_ExcludesMembersWhoHaveLeftOrBeenRemoved()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        var leftUserId = Guid.CreateVersion7();
+        var removedUserId = Guid.CreateVersion7();
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        board!.GrantMembership(leftUserId, _clock.UtcNow);
+        board.GrantMembership(removedUserId, _clock.UtcNow);
+        board.Leave(leftUserId, _clock.UtcNow);
+        board.RemoveMember(removedUserId, _clock.UtcNow, ownerUserId);
+
+        var result = await _sut.ListMembersAsync(ownerUserId, created.Value.Id, cursor: null, limit: 20, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(result.Value.Items);
+        Assert.Equal(ownerUserId, result.Value.Items.Single().UserId);
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_DegradesGracefullyWhenNoUserRecordExists()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.ListMembersAsync(ownerUserId, created.Value.Id, cursor: null, limit: 20, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var owner = Assert.Single(result.Value.Items);
+        Assert.Null(owner.DisplayName);
+        Assert.Null(owner.PhotoUrl);
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_RespectsTheCursorAndLimit()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        for (var i = 0; i < 2; i++)
+            board!.GrantMembership(Guid.CreateVersion7(), _clock.UtcNow);
+
+        // 3 Active Members total (owner + 2 granted); limit 2 -> a full first page (cursor set) and a partial second page (cursor null).
+        var firstPage = await _sut.ListMembersAsync(ownerUserId, created.Value.Id, cursor: null, limit: 2, CancellationToken.None);
+        Assert.Equal(2, firstPage.Value.Items.Count);
+        Assert.NotNull(firstPage.Value.NextCursor);
+
+        var secondPage = await _sut.ListMembersAsync(ownerUserId, created.Value.Id, firstPage.Value.NextCursor, limit: 2, CancellationToken.None);
+        Assert.Single(secondPage.Value.Items);
+        Assert.Null(secondPage.Value.NextCursor);
+        Assert.DoesNotContain(secondPage.Value.Items, m => firstPage.Value.Items.Select(item => item.UserId).Contains(m.UserId));
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var strangerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.ListMembersAsync(strangerUserId, created.Value.Id, cursor: null, limit: 20, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ListMembersAsync_ReturnsNotFoundForABoardThatDoesNotExist()
+    {
+        var result = await _sut.ListMembersAsync(
+            Guid.CreateVersion7(), Guid.CreateVersion7(), cursor: null, limit: 20, CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal("NOT_FOUND", result.Error.Code);

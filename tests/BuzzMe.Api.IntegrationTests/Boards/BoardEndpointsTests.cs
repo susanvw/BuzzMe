@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using BuzzMe.Contracts.V1.Boards;
 using BuzzMe.Contracts.V1.Common;
 using BuzzMe.Domain.Boards;
+using BuzzMe.Domain.Users;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BuzzMe.Api.IntegrationTests.Boards;
@@ -347,6 +348,84 @@ public sealed class BoardEndpointsTests : IClassFixture<BuzzMeApiFactory>
         var client = _factory.CreateClient();
 
         var response = await client.DeleteAsync($"/v1/boards/{Guid.CreateVersion7()}/members/{Guid.CreateVersion7()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    /// <summary>Seeds an Active User (real repository, real MongoDB) so List Members' displayName/photoUrl lookup has something real to find.</summary>
+    private async Task SeedUserAsync(Guid userId, string displayName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+        var now = DateTimeOffset.UtcNow;
+        var user = User.Register(
+            new UserId(userId), $"{Guid.CreateVersion7()}@example.com", null, "hashed-password", new DisplayName(displayName),
+            "000000", now.AddMinutes(15), now);
+        user.Verify(now);
+        await userRepository.AddAsync(user, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ListMembers_ReturnsEveryActiveMemberWithTheirProfileFields()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        await SeedUserAsync(ownerUserId, "Alice Owner");
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var otherUserId = Guid.CreateVersion7();
+        await SeedUserAsync(otherUserId, "Bob Member");
+        await AddMemberDirectlyAsync(created.Id, otherUserId);
+
+        var response = await ownerClient.GetAsync($"/v1/boards/{created.Id}/members");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiListResponse<MembershipResponse>>();
+        Assert.NotNull(body?.Data);
+        Assert.Equal(2, body.Data.Count);
+        var owner = body.Data.Single(m => m.UserId == ownerUserId);
+        Assert.Equal("Alice Owner", owner.DisplayName);
+        Assert.Equal("Owner", owner.Role);
+        var other = body.Data.Single(m => m.UserId == otherUserId);
+        Assert.Equal("Bob Member", other.DisplayName);
+        Assert.Equal("Member", other.Role);
+    }
+
+    [Fact]
+    public async Task ListMembers_ExcludesAMemberWhoHasLeft()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var leavingUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, leavingUserId);
+        var leavingClient = CreateAuthenticatedClient(leavingUserId);
+        await leavingClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        var response = await ownerClient.GetAsync($"/v1/boards/{created.Id}/members");
+
+        var body = await response.Content.ReadFromJsonAsync<ApiListResponse<MembershipResponse>>();
+        Assert.NotNull(body?.Data);
+        Assert.DoesNotContain(body.Data, m => m.UserId == leavingUserId);
+    }
+
+    [Fact]
+    public async Task ListMembers_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.GetAsync($"/v1/boards/{created.Id}/members");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ListMembers_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/v1/boards/{Guid.CreateVersion7()}/members");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

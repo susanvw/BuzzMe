@@ -7,7 +7,7 @@ using FluentValidation;
 
 namespace BuzzMe.Api.Endpoints;
 
-/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), and (Sprint 10) Leave/Remove Member.</summary>
+/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), Leave/Remove Member (Sprint 10), and List Members (Sprint 11).</summary>
 public static class BoardEndpoints
 {
     public static IEndpointRouteBuilder MapBoardEndpoints(this IEndpointRouteBuilder app)
@@ -21,6 +21,7 @@ public static class BoardEndpoints
         group.MapPost("/{boardId:guid}/unmute", UnmuteBoardAsync);
         group.MapPost("/{boardId:guid}/leave", LeaveBoardAsync);
         group.MapDelete("/{boardId:guid}/members/{userId:guid}", RemoveMemberAsync);
+        group.MapGet("/{boardId:guid}/members", ListMembersAsync);
 
         return app;
     }
@@ -138,5 +139,26 @@ public static class BoardEndpoints
         }
 
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> ListMembersAsync(
+        Guid boardId,
+        string? cursor,
+        int? limit,
+        BoardApplicationService boardService,
+        ICurrentUserContext currentUser,
+        CancellationToken cancellationToken)
+    {
+        // API_CONTRACT.md §7 — default 20, max 100, same as every other list endpoint.
+        var effectiveLimit = Math.Clamp(limit ?? 20, 1, 100);
+
+        var result = await boardService.ListMembersAsync(currentUser.UserId, boardId, cursor, effectiveLimit, cancellationToken);
+        if (result.IsFailure)
+        {
+            var (statusCode, apiError) = result.Error.ToHttp();
+            return Results.Json(new ApiListResponse<MembershipResponse>(null, null, apiError), statusCode: statusCode);
+        }
+
+        return Results.Json(result.Value.ToListResponse(), statusCode: StatusCodes.Status200OK);
     }
 }
