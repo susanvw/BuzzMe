@@ -1,4 +1,3 @@
-using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Users;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo.Users;
@@ -21,6 +20,7 @@ public sealed class UserRepositoryTests(MongoIntegrationTestFixture fixture) : I
     {
         _repository = new UserRepository(fixture.Context);
         await new CreateUserIndexes(fixture.Context).ApplyAsync(CancellationToken.None);
+        await new CreateUserPasswordResetIndex(fixture.Context).ApplyAsync(CancellationToken.None);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -34,9 +34,9 @@ public sealed class UserRepositoryTests(MongoIntegrationTestFixture fixture) : I
     private static string UniquePhone() => $"+1555{Random.Shared.Next(1000000, 9999999)}";
 
     private static User NewUser(Guid? id = null, string? email = null, string? phone = null, string displayName = "Alice") =>
-        User.Provision(
+        User.Register(
             new UserId(id ?? Guid.CreateVersion7()), email ?? (phone is null ? UniqueEmail() : null), phone,
-            new DisplayName(displayName), new BoardId(Guid.CreateVersion7()), Now);
+            "hashed-password", new DisplayName(displayName), "123456", Now + TimeSpan.FromMinutes(15), Now);
 
     [Fact]
     public async Task AddAsync_PersistsTheUserAtVersionZero()
@@ -51,7 +51,8 @@ public sealed class UserRepositoryTests(MongoIntegrationTestFixture fixture) : I
         Assert.Equal(0, reloaded.Version);
         Assert.Equal(email, reloaded.Email);
         Assert.Equal("Alice", reloaded.DisplayName.Value);
-        Assert.Equal(UserStatus.Active, reloaded.Status);
+        Assert.Equal(UserStatus.PendingVerification, reloaded.Status);
+        Assert.Null(reloaded.PersonalBoardId);
     }
 
     [Fact]
@@ -129,6 +130,71 @@ public sealed class UserRepositoryTests(MongoIntegrationTestFixture fixture) : I
     }
 
     [Fact]
+    public async Task GetByEmailOrPhoneAsync_FindsTheUserByEmail()
+    {
+        var email = UniqueEmail();
+        var user = NewUser(email: email);
+        await _repository.AddAsync(user, CancellationToken.None);
+
+        var result = await _repository.GetByEmailOrPhoneAsync(email, null, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(user.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task GetByEmailOrPhoneAsync_FindsTheUserByPhone()
+    {
+        var phone = UniquePhone();
+        var user = NewUser(email: null, phone: phone);
+        await _repository.AddAsync(user, CancellationToken.None);
+
+        var result = await _repository.GetByEmailOrPhoneAsync(null, phone, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(user.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task GetByEmailOrPhoneAsync_ReturnsNullWhenNeitherMatches()
+    {
+        var result = await _repository.GetByEmailOrPhoneAsync(UniqueEmail(), UniquePhone(), CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetByPasswordResetTokenHashAsync_FindsTheMatchingUser()
+    {
+        var user = NewUser();
+        user.Verify(Now);
+        user.RequestPasswordReset("a-token-hash", Now + TimeSpan.FromHours(1), Now);
+        await _repository.AddAsync(user, CancellationToken.None);
+
+        var result = await _repository.GetByPasswordResetTokenHashAsync("a-token-hash", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(user.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task GetByPasswordResetTokenHashAsync_ReturnsNullWhenNoUserHasThatToken()
+    {
+        var result = await _repository.GetByPasswordResetTokenHashAsync("no-such-token-hash", CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task AddAsync_AllowsTwoUsersWithNoOutstandingPasswordResetToken()
+    {
+        // The sparse index must not treat "no reset token" as a colliding null across Users — same lesson as the Email/Phone sparse indexes.
+        await _repository.AddAsync(NewUser(email: UniqueEmail()), CancellationToken.None);
+
+        await _repository.AddAsync(NewUser(email: UniqueEmail()), CancellationToken.None);
+    }
+
+    [Fact]
     public async Task UpdateAsync_PersistsProfileChanges()
     {
         var user = NewUser();
@@ -141,5 +207,20 @@ public sealed class UserRepositoryTests(MongoIntegrationTestFixture fixture) : I
         Assert.NotNull(reloaded);
         Assert.Equal("Alicia", reloaded.DisplayName.Value);
         Assert.Equal("https://example.com/photo.jpg", reloaded.PhotoUrl);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsVerificationAndProvisioning()
+    {
+        var user = NewUser();
+        await _repository.AddAsync(user, CancellationToken.None);
+
+        user.Verify(Now);
+        await _repository.UpdateAsync(user, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(user.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(UserStatus.Active, reloaded.Status);
+        Assert.Null(reloaded.VerificationCode);
     }
 }

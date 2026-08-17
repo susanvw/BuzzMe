@@ -47,6 +47,33 @@ public sealed class UserRepository(MongoContext context) : IUserRepository
         return await Collection.Find(filter).AnyAsync(cancellationToken);
     }
 
+    public async Task<User?> GetByEmailOrPhoneAsync(string? email, string? phone, CancellationToken cancellationToken)
+    {
+        var clauses = new List<FilterDefinition<UserDocument>>();
+        if (!string.IsNullOrWhiteSpace(email))
+            clauses.Add(Builders<UserDocument>.Filter.Eq(d => d.Email, email));
+        if (!string.IsNullOrWhiteSpace(phone))
+            clauses.Add(Builders<UserDocument>.Filter.Eq(d => d.Phone, phone));
+
+        if (clauses.Count == 0)
+            return null;
+
+        var document = await Collection
+            .Find(Builders<UserDocument>.Filter.Or(clauses))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return document is null ? null : UserMapper.ToDomain(document);
+    }
+
+    public async Task<User?> GetByPasswordResetTokenHashAsync(string tokenHash, CancellationToken cancellationToken)
+    {
+        var document = await Collection
+            .Find(Builders<UserDocument>.Filter.Eq(d => d.PasswordResetTokenHash, tokenHash))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return document is null ? null : UserMapper.ToDomain(document);
+    }
+
     public async Task UpdateAsync(User user, CancellationToken cancellationToken)
     {
         await Collection.ReplaceOneAsync(

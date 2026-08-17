@@ -6,6 +6,7 @@ using BuzzMe.Api.Endpoints;
 using BuzzMe.Api.Identity;
 using BuzzMe.Api.Middleware;
 using BuzzMe.Application.Abstractions;
+using BuzzMe.Application.Auth;
 using BuzzMe.Application.Boards;
 using BuzzMe.Application.Invitations;
 using BuzzMe.Application.Reminders;
@@ -70,6 +71,7 @@ builder.Services.AddScoped<BoardApplicationService>();
 builder.Services.AddScoped<ReminderApplicationService>();
 builder.Services.AddScoped<InvitationApplicationService>();
 builder.Services.AddScoped<UserApplicationService>();
+builder.Services.AddScoped<AuthApplicationService>();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Liveness is Api-specific (it only asks "is the process up"), so it's registered here
@@ -101,6 +103,7 @@ app.MapBoardEndpoints();
 app.MapReminderEndpoints();
 app.MapInvitationEndpoints();
 app.MapUserEndpoints();
+app.MapAuthEndpoints();
 
 app.Run();
 

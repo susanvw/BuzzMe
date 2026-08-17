@@ -31,6 +31,18 @@ public sealed class InMemoryUserRepository : IUserRepository
         return Task.FromResult(matches);
     }
 
+    public Task<User?> GetByEmailOrPhoneAsync(string? email, string? phone, CancellationToken cancellationToken)
+    {
+        var match = _users.FirstOrDefault(user =>
+            (!string.IsNullOrWhiteSpace(email) && user.Email == email) ||
+            (!string.IsNullOrWhiteSpace(phone) && user.Phone == phone));
+
+        return Task.FromResult(match);
+    }
+
+    public Task<User?> GetByPasswordResetTokenHashAsync(string tokenHash, CancellationToken cancellationToken) =>
+        Task.FromResult(_users.FirstOrDefault(user => user.PasswordResetTokenHash == tokenHash));
+
     public Task UpdateAsync(User user, CancellationToken cancellationToken) =>
         // No-op: the fake holds User by reference — the caller already mutated it via
         // user.UpdateProfile(...) before calling this. Same reasoning as

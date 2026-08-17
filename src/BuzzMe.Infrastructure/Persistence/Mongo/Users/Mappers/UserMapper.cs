@@ -13,9 +13,14 @@ internal static class UserMapper
         Phone = user.Phone,
         DisplayName = user.DisplayName.Value,
         PhotoUrl = user.PhotoUrl,
-        PersonalBoardId = user.PersonalBoardId.Value,
+        PasswordHash = user.PasswordHash,
+        PersonalBoardId = user.PersonalBoardId?.Value,
         Status = user.Status.ToCode(),
         CreatedAt = user.CreatedAt,
+        VerificationCode = user.VerificationCode,
+        VerificationCodeExpiresAt = user.VerificationCodeExpiresAt,
+        PasswordResetTokenHash = user.PasswordResetTokenHash,
+        PasswordResetTokenExpiresAt = user.PasswordResetTokenExpiresAt,
         Version = user.Version,
     };
 
@@ -30,9 +35,14 @@ internal static class UserMapper
             document.Phone,
             new DisplayName(document.DisplayName),
             document.PhotoUrl,
-            new BoardId(document.PersonalBoardId),
+            document.PasswordHash,
+            document.PersonalBoardId is { } personalBoardId ? new BoardId(personalBoardId) : null,
             status,
             document.CreatedAt,
+            document.VerificationCode,
+            document.VerificationCodeExpiresAt,
+            document.PasswordResetTokenHash,
+            document.PasswordResetTokenExpiresAt,
             document.Version);
     }
 }

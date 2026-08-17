@@ -1,52 +1,18 @@
 using BuzzMe.Application.Abstractions;
 using BuzzMe.Application.Users.Models;
-using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.SeedWork;
 using BuzzMe.Domain.Users;
 
 namespace BuzzMe.Application.Users;
 
 /// <summary>
-/// One Application Service for the Users bounded-context area — Sprint 8's three use
-/// cases. `ProvisionAccountAsync` is deliberately not API_CONTRACT.md's unauthenticated
-/// `POST /auth/register` (which needs password storage and a verification-code pipeline
-/// this codebase doesn't have — see SPRINT_8_REPORT.md's specification gap); it requires
-/// an already-authenticated caller and uses their own JWT-established identity as the new
-/// User's Id, never a generated one.
+/// One Application Service for the Users bounded-context area — profile read/update, self
+/// only. Account creation (Register/VerifyAccount) and credential management (Login,
+/// RefreshToken, ForgotPassword/ResetPassword) moved to AuthApplicationService in Sprint 9,
+/// which supersedes Sprint 8's ProvisionAccountAsync shortcut — see SPRINT_9_REPORT.md.
 /// </summary>
-public sealed class UserApplicationService(
-    IUserRepository userRepository, IBoardRepository boardRepository, IIdGenerator idGenerator, IClock clock)
+public sealed class UserApplicationService(IUserRepository userRepository, IClock clock)
 {
-    /// <summary>
-    /// Collapses IMPLEMENTATION_SPEC.md's RegisterAccount → VerifyAccount → Account
-    /// Provisioning sequence into one step (see User.Provision's own doc comment).
-    /// Personal Board is created first, so its Id is available to set on the User in the
-    /// same operation — matching APPLICATION_LAYER_SPEC.md §7's own stated ordering.
-    /// Idempotent: calling this again for an already-provisioned caller returns their
-    /// existing record rather than erroring.
-    /// </summary>
-    public async Task<Result<UserResult>> ProvisionAccountAsync(
-        Guid requestingUserId, string? email, string? phone, string displayName, CancellationToken cancellationToken)
-    {
-        var userId = new UserId(requestingUserId);
-
-        var existing = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (existing is not null)
-            return Result.Success(UserResult.FromDomain(existing));
-
-        if (await userRepository.ExistsWithEmailOrPhoneAsync(email, phone, excludingUserId: null, cancellationToken))
-            return Result.Failure<UserResult>(Error.Conflict("Email or phone is already registered."));
-
-        var personalBoardId = new BoardId(idGenerator.NewId());
-        var personalBoard = Board.Create(personalBoardId, new BoardName("Personal"), requestingUserId, clock.UtcNow);
-        await boardRepository.AddAsync(personalBoard, cancellationToken);
-
-        var user = User.Provision(userId, email, phone, new DisplayName(displayName), personalBoardId, clock.UtcNow);
-        await userRepository.AddAsync(user, cancellationToken);
-
-        return Result.Success(UserResult.FromDomain(user));
-    }
-
     /// <summary>API_CONTRACT.md §5 — Authorization: Authenticated User, self only.</summary>
     public async Task<Result<UserResult>> GetCurrentUserAsync(Guid requestingUserId, CancellationToken cancellationToken)
     {

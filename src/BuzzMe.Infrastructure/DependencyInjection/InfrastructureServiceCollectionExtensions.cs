@@ -1,4 +1,5 @@
 using BuzzMe.Application.Abstractions;
+using BuzzMe.Domain.Auth;
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Buzzes;
 using BuzzMe.Domain.Invitations;
@@ -14,6 +15,7 @@ using BuzzMe.Infrastructure.Messaging.Sms;
 using BuzzMe.Infrastructure.Persistence.Migrations;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo;
+using BuzzMe.Infrastructure.Persistence.Mongo.Auth;
 using BuzzMe.Infrastructure.Persistence.Mongo.Boards;
 using BuzzMe.Infrastructure.Persistence.Mongo.Buzzes;
 using BuzzMe.Infrastructure.Persistence.Mongo.Invitations;
@@ -21,6 +23,7 @@ using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
 using BuzzMe.Infrastructure.Persistence.Mongo.Users;
 using BuzzMe.Infrastructure.Persistence.Outbox;
+using BuzzMe.Infrastructure.Security;
 using BuzzMe.Infrastructure.Time;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,9 +43,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<MongoContext>();
         services.AddHealthChecks().AddCheck<MongoHealthCheck>("mongodb", tags: ["ready"]);
 
+        services.Configure<JwtIssuerOptions>(configuration.GetSection(JwtIssuerOptions.SectionName));
+
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIdGenerator, TimeSortableIdGenerator>();
         services.AddSingleton<IInvitationTokenGenerator, SecureInvitationTokenGenerator>();
+        services.AddSingleton<ISecureTokenGenerator, SecureTokenGenerator>();
+        services.AddSingleton<IVerificationCodeGenerator, NumericVerificationCodeGenerator>();
+        services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
 
         services.AddSingleton<IOutboxWriter, MongoOutboxWriter>();
         services.AddSingleton<MongoMigrationRunner>();
@@ -52,6 +61,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IMongoMigration, CreateBuzzIndexes>();
         services.AddSingleton<IMongoMigration, CreateInvitationIndexes>();
         services.AddSingleton<IMongoMigration, CreateUserIndexes>();
+        services.AddSingleton<IMongoMigration, CreateUserPasswordResetIndex>();
+        services.AddSingleton<IMongoMigration, CreateRefreshTokenIndexes>();
 
         // Default to logging instead of delivering until a real provider is wired up —
         // see NullPushNotificationSender/NullEmailSender/NullSmsSender for why this is
@@ -81,6 +92,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IBuzzRepository, BuzzRepository>();
         services.AddScoped<IInvitationRepository, InvitationRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         return services;
     }
