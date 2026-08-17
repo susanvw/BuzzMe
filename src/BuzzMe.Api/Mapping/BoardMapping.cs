@@ -18,4 +18,6 @@ public static class BoardMapping
 
     public static MembershipResponse ToResponse(this MembershipResult result) =>
         new(result.BoardId, result.UserId, result.Role);
+
+    public static LeaveBoardResponse ToResponse(this LeaveBoardResult result) => new(result.ReassignedOwnerUserId);
 }

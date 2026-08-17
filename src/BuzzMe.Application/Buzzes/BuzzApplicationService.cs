@@ -25,13 +25,14 @@ public sealed class BuzzApplicationService(
     /// Generation Rules (Sprint 4 brief): the Reminder exists and is not deleted (enforced
     /// by ReminderRepository's soft-delete-filtering GetByIdAsync — Sprint 3.1), the
     /// Occurrence exists, the Board still exists, and one Buzz is generated per current
-    /// Board Member who does not already have one for this Occurrence — which is exactly
-    /// what makes repeated calls idempotent (no membership change → nothing left to
-    /// generate → empty result). "The Member is active" has no separate check: every
-    /// Membership present on Board.Memberships is active by construction — no inactive
-    /// state exists in this codebase yet (Membership.cs). "The Member is not blocked" is
-    /// NOT checked — see SPRINT_4_REPORT.md's specification gap: no Block concept is
-    /// implemented anywhere in this codebase, so there is nothing to check against.
+    /// Active Board Member who does not already have one for this Occurrence — which is
+    /// exactly what makes repeated calls idempotent (no membership change → nothing left to
+    /// generate → empty result). "The Member is active" is checked explicitly (Sprint 10):
+    /// Board.Memberships can now hold historical Removed/Left rows for someone who left or
+    /// was removed (Membership.cs), so iterating the raw collection would incorrectly
+    /// re-buzz them. "The Member is not blocked" is NOT checked — see SPRINT_4_REPORT.md's
+    /// specification gap: no Block concept is implemented anywhere in this codebase, so
+    /// there is nothing to check against.
     /// </summary>
     public async Task<Result<IReadOnlyList<BuzzResult>>> GenerateBuzzesAsync(
         Guid requestingUserId, Guid occurrenceId, CancellationToken cancellationToken)
@@ -55,7 +56,7 @@ public sealed class BuzzApplicationService(
         var scheduledAt = occurrence.DueAt - reminder.NotifyPreset.ToLeadTime();
 
         var generated = new List<BuzzResult>();
-        foreach (var membership in board.Memberships)
+        foreach (var membership in board.Memberships.Where(m => m.Status == MembershipStatus.Active))
         {
             if (existingRecipients.Contains(membership.UserId))
                 continue;

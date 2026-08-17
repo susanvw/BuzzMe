@@ -91,7 +91,7 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
         await _repository.AddAsync(board, CancellationToken.None);
         var newMemberUserId = Guid.CreateVersion7();
 
-        await _repository.AddMemberAsync(board.Id, newMemberUserId, CancellationToken.None);
+        await _repository.AddMemberAsync(board.Id, newMemberUserId, Now, CancellationToken.None);
         var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
 
         Assert.NotNull(reloaded);
@@ -120,7 +120,7 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
         var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
         await _repository.AddAsync(board, CancellationToken.None);
         var otherMemberUserId = Guid.CreateVersion7();
-        await _repository.AddMemberAsync(board.Id, otherMemberUserId, CancellationToken.None);
+        await _repository.AddMemberAsync(board.Id, otherMemberUserId, Now, CancellationToken.None);
 
         await _repository.SetMembershipMutedAsync(board.Id, otherMemberUserId, muted: true, CancellationToken.None);
         var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
@@ -143,5 +143,59 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
 
         Assert.NotNull(reloaded);
         Assert.False(reloaded.Memberships.Single(m => m.UserId == ownerUserId).Muted);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsALeaveWithReassignment()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var otherMemberUserId = Guid.CreateVersion7();
+        board.GrantMembership(otherMemberUserId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        var reassignedOwnerUserId = board.Leave(ownerUserId, Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(otherMemberUserId, reassignedOwnerUserId);
+        Assert.Equal(otherMemberUserId, reloaded.OwnerUserId);
+        Assert.False(reloaded.HasMember(ownerUserId));
+        Assert.Equal(MembershipStatus.Left, reloaded.Memberships.Single(m => m.UserId == ownerUserId).Status);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsARemoval()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var targetUserId = Guid.CreateVersion7();
+        board.GrantMembership(targetUserId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        board.RemoveMember(targetUserId, Now.AddDays(1), ownerUserId);
+        await _repository.UpdateAsync(board, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.False(reloaded.HasMember(targetUserId));
+        Assert.Equal(MembershipStatus.Removed, reloaded.Memberships.Single(m => m.UserId == targetUserId).Status);
+    }
+
+    [Fact]
+    public async Task ListByMemberAsync_ExcludesBoardsTheUserHasLeft()
+    {
+        var userId = Guid.CreateVersion7();
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        board.GrantMembership(userId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+        board.Leave(userId, Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+
+        var results = await _repository.ListByMemberAsync(userId, afterId: null, limit: 20, CancellationToken.None);
+
+        Assert.DoesNotContain(results, b => b.Id == board.Id);
     }
 }

@@ -20,6 +20,7 @@ namespace BuzzMe.Application.Tests.Acceptance;
 public sealed class CollaborationAcceptanceTests
 {
     private readonly InMemoryBoardRepository _boardRepository = new();
+    private readonly InMemoryUserRepository _userRepository = new();
     private readonly InMemoryReminderRepository _reminderRepository = new();
     private readonly InMemoryOccurrenceRepository _occurrenceRepository = new();
     private readonly InMemoryBuzzRepository _buzzRepository = new();
@@ -35,7 +36,7 @@ public sealed class CollaborationAcceptanceTests
     public CollaborationAcceptanceTests()
     {
         var idGenerator = new FakeIdGenerator();
-        _boardService = new BoardApplicationService(_boardRepository, idGenerator, _clock);
+        _boardService = new BoardApplicationService(_boardRepository, _userRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(_reminderRepository, _boardRepository, idGenerator, _clock);
         _occurrenceService = new OccurrenceApplicationService(_occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
         _buzzService = new BuzzApplicationService(_buzzRepository, _occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);

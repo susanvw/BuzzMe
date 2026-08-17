@@ -18,6 +18,8 @@ internal static class BoardMapper
     {
         UserId = membership.UserId,
         Role = membership.Role.ToString(),
+        Status = membership.Status.ToString(),
+        JoinedAt = membership.JoinedAt,
         Muted = membership.Muted,
     };
 
@@ -29,5 +31,5 @@ internal static class BoardMapper
         document.Version);
 
     private static Membership ToDomain(MembershipDocument document) =>
-        new(document.UserId, Enum.Parse<MembershipRole>(document.Role), document.Muted);
+        new(document.UserId, Enum.Parse<MembershipRole>(document.Role), document.JoinedAt, document.Muted, Enum.Parse<MembershipStatus>(document.Status));
 }

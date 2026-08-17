@@ -11,6 +11,7 @@ using BuzzMe.Infrastructure.Persistence.Mongo.Boards;
 using BuzzMe.Infrastructure.Persistence.Mongo.Buzzes;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
+using BuzzMe.Infrastructure.Persistence.Mongo.Users;
 using BuzzMe.Workers.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,6 +46,7 @@ public sealed class BuzzDeliveryWorkerTests(MongoIntegrationTestFixture fixture)
     public async Task InitializeAsync()
     {
         var boardRepository = new BoardRepository(fixture.Context);
+        var userRepository = new UserRepository(fixture.Context);
         var reminderRepository = new ReminderRepository(fixture.Context);
         var occurrenceRepository = new OccurrenceRepository(fixture.Context);
         _buzzRepository = new BuzzRepository(fixture.Context);
@@ -55,7 +57,7 @@ public sealed class BuzzDeliveryWorkerTests(MongoIntegrationTestFixture fixture)
         await new CreateBuzzIndexes(fixture.Context).ApplyAsync(CancellationToken.None);
 
         var idGenerator = new TimeSortableIdGenerator();
-        _boardService = new BoardApplicationService(boardRepository, idGenerator, _clock);
+        _boardService = new BoardApplicationService(boardRepository, userRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(reminderRepository, boardRepository, idGenerator, _clock);
         _occurrenceService = new OccurrenceApplicationService(occurrenceRepository, reminderRepository, boardRepository, idGenerator, _clock);
         _buzzService = new BuzzApplicationService(_buzzRepository, occurrenceRepository, reminderRepository, boardRepository, idGenerator, _clock);

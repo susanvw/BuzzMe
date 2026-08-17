@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using BuzzMe.Contracts.V1.Boards;
 using BuzzMe.Contracts.V1.Common;
+using BuzzMe.Domain.Boards;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BuzzMe.Api.IntegrationTests.Boards;
 
@@ -192,5 +194,160 @@ public sealed class BoardEndpointsTests : IClassFixture<BuzzMeApiFactory>
         var response = await client.PostAsJsonAsync("/v1/boards", new CreateBoardRequest(name));
         var body = await response.Content.ReadFromJsonAsync<ApiResponse<BoardResponse>>();
         return body!.Data!;
+    }
+
+    /// <summary>
+    /// No HTTP-reachable way to add a second Member without a full Invitation accept flow
+    /// (InvitationEndpointsTests' own job) — seeds directly against the real repository,
+    /// same pattern as UserEndpointsTests' SeedActiveUserAsync.
+    /// </summary>
+    private async Task AddMemberDirectlyAsync(Guid boardId, Guid userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var boardRepository = scope.ServiceProvider.GetRequiredService<IBoardRepository>();
+        var board = await boardRepository.GetByIdAsync(new BoardId(boardId), CancellationToken.None);
+        board!.GrantMembership(userId, DateTimeOffset.UtcNow);
+        await boardRepository.UpdateAsync(board, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task LeaveBoard_NonOwnerMember_ReturnsNullReassignedOwner()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var leavingUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, leavingUserId);
+        var leavingClient = CreateAuthenticatedClient(leavingUserId);
+
+        var response = await leavingClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<LeaveBoardResponse>>();
+        Assert.Null(body?.Data?.ReassignedOwnerUserId);
+    }
+
+    [Fact]
+    public async Task LeaveBoard_SoleOwnerWithOtherMembers_ReturnsTheReassignedOwner()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var otherMemberUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, otherMemberUserId);
+
+        var response = await ownerClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<LeaveBoardResponse>>();
+        Assert.Equal(otherMemberUserId, body?.Data?.ReassignedOwnerUserId);
+    }
+
+    [Fact]
+    public async Task LeaveBoard_SoleMemberEntirely_ReturnsForbidden()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<LeaveBoardResponse>>();
+        Assert.Equal(ErrorCode.Forbidden, body?.Error?.Code);
+    }
+
+    [Fact]
+    public async Task LeaveBoard_CalledAgain_IsStillOk()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var leavingUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, leavingUserId);
+        var leavingClient = CreateAuthenticatedClient(leavingUserId);
+        await leavingClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        var response = await leavingClient.PostAsync($"/v1/boards/{created.Id}/leave", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LeaveBoard_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync($"/v1/boards/{Guid.CreateVersion7()}/leave", content: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveMember_OwnerRemovesAMember_ReturnsNoContent()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var targetUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, targetUserId);
+
+        var response = await ownerClient.DeleteAsync($"/v1/boards/{created.Id}/members/{targetUserId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveMember_ByANonOwner_ReturnsForbidden()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var nonOwnerUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, nonOwnerUserId);
+        var targetUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, targetUserId);
+        var nonOwnerClient = CreateAuthenticatedClient(nonOwnerUserId);
+
+        var response = await nonOwnerClient.DeleteAsync($"/v1/boards/{created.Id}/members/{targetUserId}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveMember_TargetingSelf_ReturnsConflict()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.DeleteAsync($"/v1/boards/{created.Id}/members/{ownerUserId}");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveMember_CalledAgain_IsStillNoContent()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var targetUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, targetUserId);
+        await ownerClient.DeleteAsync($"/v1/boards/{created.Id}/members/{targetUserId}");
+
+        var response = await ownerClient.DeleteAsync($"/v1/boards/{created.Id}/members/{targetUserId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveMember_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.DeleteAsync($"/v1/boards/{Guid.CreateVersion7()}/members/{Guid.CreateVersion7()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

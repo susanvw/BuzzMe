@@ -188,6 +188,160 @@ public sealed class BoardTests
         Assert.Throws<InvalidOperationException>(() => board.UnmuteBoard(Guid.CreateVersion7(), Now));
     }
 
+    [Fact]
+    public void Leave_NonOwnerMember_MarksLeftAndRaisesMemberLeft()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(boardId, new BoardName("Family"), ownerUserId, Now);
+        var leavingUserId = Guid.CreateVersion7();
+        board.GrantMembership(leavingUserId, Now);
+
+        var reassignedOwnerUserId = board.Leave(leavingUserId, Now);
+
+        Assert.Null(reassignedOwnerUserId);
+        Assert.False(board.HasMember(leavingUserId));
+        var raised = Assert.Single(board.DomainEvents.OfType<MemberLeft>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal(leavingUserId, raised.UserId);
+    }
+
+    [Fact]
+    public void Leave_SoleOwnerWithOtherActiveMembers_ReassignsToTheLongestStandingOther()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var earlierMemberUserId = Guid.CreateVersion7();
+        var laterMemberUserId = Guid.CreateVersion7();
+        board.GrantMembership(earlierMemberUserId, Now);
+        board.GrantMembership(laterMemberUserId, Now.AddDays(1));
+
+        var reassignedOwnerUserId = board.Leave(ownerUserId, Now.AddDays(2));
+
+        Assert.Equal(earlierMemberUserId, reassignedOwnerUserId);
+        Assert.Equal(earlierMemberUserId, board.OwnerUserId);
+    }
+
+    [Fact]
+    public void Leave_Reassignment_DemotesTheDepartingOwnerToMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var otherMemberUserId = Guid.CreateVersion7();
+        board.GrantMembership(otherMemberUserId, Now);
+
+        board.Leave(ownerUserId, Now);
+
+        var departedMembership = board.Memberships.Single(m => m.UserId == ownerUserId);
+        Assert.Equal(MembershipRole.Member, departedMembership.Role);
+        Assert.Equal(MembershipStatus.Left, departedMembership.Status);
+    }
+
+    [Fact]
+    public void Leave_Reassignment_RaisesBoardOwnershipReassigned()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(boardId, new BoardName("Family"), ownerUserId, Now);
+        var otherMemberUserId = Guid.CreateVersion7();
+        board.GrantMembership(otherMemberUserId, Now);
+
+        board.Leave(ownerUserId, Now);
+
+        var raised = Assert.Single(board.DomainEvents.OfType<BoardOwnershipReassigned>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal(ownerUserId, raised.PreviousOwnerUserId);
+        Assert.Equal(otherMemberUserId, raised.NewOwnerUserId);
+    }
+
+    [Fact]
+    public void Leave_ThrowsWhenTheDepartingUserIsTheOnlyActiveMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+
+        Assert.Throws<InvalidOperationException>(() => board.Leave(ownerUserId, Now));
+    }
+
+    [Fact]
+    public void Leave_ThrowsForSomeoneWhoIsNotAnActiveMember()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        Assert.Throws<InvalidOperationException>(() => board.Leave(Guid.CreateVersion7(), Now));
+    }
+
+    [Fact]
+    public void Leave_NonOwnerLeaving_DoesNotReassignOwnership()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var leavingUserId = Guid.CreateVersion7();
+        board.GrantMembership(leavingUserId, Now);
+
+        board.Leave(leavingUserId, Now);
+
+        Assert.Equal(ownerUserId, board.OwnerUserId);
+        Assert.Empty(board.DomainEvents.OfType<BoardOwnershipReassigned>());
+    }
+
+    [Fact]
+    public void RemoveMember_MarksTheTargetRemovedAndRaisesMemberRemoved()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(boardId, new BoardName("Family"), ownerUserId, Now);
+        var targetUserId = Guid.CreateVersion7();
+        board.GrantMembership(targetUserId, Now);
+
+        board.RemoveMember(targetUserId, Now, ownerUserId);
+
+        Assert.False(board.HasMember(targetUserId));
+        Assert.Equal(MembershipStatus.Removed, board.Memberships.Single(m => m.UserId == targetUserId).Status);
+        var raised = Assert.Single(board.DomainEvents.OfType<MemberRemoved>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal(targetUserId, raised.UserId);
+        Assert.Equal(ownerUserId, raised.RemovedByUserId);
+    }
+
+    [Fact]
+    public void RemoveMember_ThrowsForSomeoneWhoIsNotAnActiveMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+
+        Assert.Throws<InvalidOperationException>(() => board.RemoveMember(Guid.CreateVersion7(), Now, ownerUserId));
+    }
+
+    [Fact]
+    public void GrantMembership_AfterLeaving_CreatesANewRowRatherThanReactivatingTheOld()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var rejoiningUserId = Guid.CreateVersion7();
+        board.GrantMembership(rejoiningUserId, Now);
+        board.Leave(rejoiningUserId, Now.AddDays(1));
+
+        board.GrantMembership(rejoiningUserId, Now.AddDays(2));
+
+        Assert.True(board.HasMember(rejoiningUserId));
+        Assert.Equal(2, board.Memberships.Count(m => m.UserId == rejoiningUserId));
+        Assert.Equal(MembershipStatus.Left, board.Memberships.Where(m => m.UserId == rejoiningUserId).OrderBy(m => m.JoinedAt).First().Status);
+        Assert.Equal(MembershipStatus.Active, board.Memberships.Where(m => m.UserId == rejoiningUserId).OrderBy(m => m.JoinedAt).Last().Status);
+    }
+
+    [Fact]
+    public void FindActiveMembership_ReturnsNullOnceRemoved()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), ownerUserId, Now);
+        var targetUserId = Guid.CreateVersion7();
+        board.GrantMembership(targetUserId, Now);
+        board.RemoveMember(targetUserId, Now, ownerUserId);
+
+        Assert.Null(board.FindActiveMembership(targetUserId));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

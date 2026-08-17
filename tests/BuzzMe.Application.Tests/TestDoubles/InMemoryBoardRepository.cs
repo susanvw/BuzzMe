@@ -33,7 +33,7 @@ public sealed class InMemoryBoardRepository : IBoardRepository
         return Task.FromResult(page);
     }
 
-    public Task AddMemberAsync(BoardId boardId, Guid userId, CancellationToken cancellationToken)
+    public Task AddMemberAsync(BoardId boardId, Guid userId, DateTimeOffset joinedAt, CancellationToken cancellationToken)
     {
         // No-op: the fake holds Board by reference, and the caller always invokes
         // board.GrantMembership(...) — which already mutated _memberships — before calling
@@ -45,6 +45,13 @@ public sealed class InMemoryBoardRepository : IBoardRepository
     {
         // No-op — same by-reference reasoning as AddMemberAsync: board.MuteBoard/UnmuteBoard
         // already mutated the shared Membership instance before this is called.
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateAsync(Board board, CancellationToken cancellationToken)
+    {
+        // No-op — same by-reference reasoning: board.Leave/RemoveMember already mutated
+        // the shared Membership instances before this is called.
         return Task.CompletedTask;
     }
 }

@@ -4,32 +4,38 @@ namespace BuzzMe.Domain.Boards;
 /// A User's relationship to a Board — an entity within the Board aggregate, per
 /// DOMAIN_MODEL.md §2/§6 (Membership lives inside Board so the "always exactly one Owner"
 /// invariant is enforceable transactionally). Identified naturally by its UserId within a
-/// Board — no separate synthetic id, since at most one Membership per (Board, User) can
-/// ever exist.
-///
-/// No lifecycle status field yet — every Membership on a Board is implicitly active by
-/// construction (Remove Member / Leave Board, a future sprint, is what will introduce
-/// that state — see SPRINT_1_REPORT.md). <see cref="Muted"/> (Sprint 7) is a delivery
-/// preference, not a lifecycle state: APPLICATION_LAYER_SPEC.md §3.4 places one person's
-/// own Board-mute flag directly on their own Membership, a single-aggregate Board
-/// transaction — not inside a separate Notification Preferences aggregate, resolving an
-/// inconsistency with BUSINESS_BEHAVIOR_MODEL.md's older, less precise framing (see
-/// SPRINT_7_REPORT.md).
+/// Board — no separate synthetic id, since at most one **Active** Membership per
+/// (Board, User) pair can ever exist (IMPLEMENTATION_SPEC.md §1) — a User who left or was
+/// removed and later rejoins gets a brand-new row, not a reactivated old one, so a Board
+/// may hold more than one historical row for the same UserId.
 /// </summary>
 public sealed class Membership
 {
     public Guid UserId { get; }
 
-    public MembershipRole Role { get; }
+    public MembershipRole Role { get; private set; }
+
+    public MembershipStatus Status { get; private set; }
+
+    /// <summary>Sprint 10 — needed to select the "longest-standing other Active Member" for automatic ownership reassignment (IMPLEMENTATION_SPEC.md §4's ReassignOwnership policy). Never changes after construction.</summary>
+    public DateTimeOffset JoinedAt { get; }
 
     public bool Muted { get; private set; }
 
-    internal Membership(Guid userId, MembershipRole role, bool muted = false)
+    internal Membership(Guid userId, MembershipRole role, DateTimeOffset joinedAt, bool muted = false, MembershipStatus status = MembershipStatus.Active)
     {
         UserId = userId;
         Role = role;
+        JoinedAt = joinedAt;
         Muted = muted;
+        Status = status;
     }
 
     internal void SetMuted(bool muted) => Muted = muted;
+
+    internal void SetRole(MembershipRole role) => Role = role;
+
+    internal void MarkLeft() => Status = MembershipStatus.Left;
+
+    internal void MarkRemoved() => Status = MembershipStatus.Removed;
 }

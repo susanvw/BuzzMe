@@ -33,7 +33,8 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
     public async Task<IReadOnlyList<Board>> ListByMemberAsync(
         Guid userId, Guid? afterId, int limit, CancellationToken cancellationToken)
     {
-        var filter = Builders<BoardDocument>.Filter.ElemMatch(d => d.Memberships, m => m.UserId == userId);
+        var filter = Builders<BoardDocument>.Filter.ElemMatch(
+            d => d.Memberships, m => m.UserId == userId && m.Status == nameof(MembershipStatus.Active));
         if (afterId is { } cursor)
             filter &= Builders<BoardDocument>.Filter.Gt(d => d.Id, cursor);
 
@@ -46,21 +47,42 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
         return documents.Select(BoardMapper.ToDomain).ToList();
     }
 
-    public async Task AddMemberAsync(BoardId boardId, Guid userId, CancellationToken cancellationToken)
+    public async Task AddMemberAsync(BoardId boardId, Guid userId, DateTimeOffset joinedAt, CancellationToken cancellationToken)
     {
         var filter = Builders<BoardDocument>.Filter.Eq(d => d.Id, boardId.Value);
         var update = Builders<BoardDocument>.Update.Push(
-            d => d.Memberships, new MembershipDocument { UserId = userId, Role = MembershipRole.Member.ToString(), Muted = false });
+            d => d.Memberships,
+            new MembershipDocument
+            {
+                UserId = userId,
+                Role = MembershipRole.Member.ToString(),
+                Status = MembershipStatus.Active.ToString(),
+                JoinedAt = joinedAt,
+                Muted = false,
+            });
 
         await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
     }
 
     public async Task SetMembershipMutedAsync(BoardId boardId, Guid userId, bool muted, CancellationToken cancellationToken)
     {
+        // Status-filtered (Sprint 10), not just UserId: Mongo's positional `$` operator
+        // updates the *first* array element matching the filter, and a Board may now hold
+        // more than one historical (Removed/Left) row for the same UserId alongside a
+        // freshly-rejoined Active one — without this, a stale row could shadow the real one.
         var filter = Builders<BoardDocument>.Filter.Eq(d => d.Id, boardId.Value)
-            & Builders<BoardDocument>.Filter.ElemMatch(d => d.Memberships, m => m.UserId == userId);
+            & Builders<BoardDocument>.Filter.ElemMatch(
+                d => d.Memberships, m => m.UserId == userId && m.Status == nameof(MembershipStatus.Active));
         var update = Builders<BoardDocument>.Update.Set("Memberships.$.Muted", muted);
 
         await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+    }
+
+    public async Task UpdateAsync(Board board, CancellationToken cancellationToken)
+    {
+        await Collection.ReplaceOneAsync(
+            Builders<BoardDocument>.Filter.Eq(d => d.Id, board.Id.Value),
+            BoardMapper.ToDocument(board),
+            cancellationToken: cancellationToken);
     }
 }

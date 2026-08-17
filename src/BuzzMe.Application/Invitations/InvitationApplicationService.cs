@@ -98,7 +98,7 @@ public sealed class InvitationApplicationService(
         // row; API_CONTRACT.md §5: "already Accepted by the same User → 200 not 409").
         if (invitation.Status == InvitationStatus.Accepted && invitation.AcceptedByUserId == requestingUserId)
         {
-            var existingMembership = board.Memberships.FirstOrDefault(membership => membership.UserId == requestingUserId);
+            var existingMembership = board.FindActiveMembership(requestingUserId);
             if (existingMembership is not null)
                 return Result.Success(MembershipResult.FromDomain(board.Id, existingMembership));
         }
@@ -117,11 +117,12 @@ public sealed class InvitationApplicationService(
         // a second, independent Invitation to the same Board, accepted after the first).
         if (!board.HasMember(requestingUserId))
         {
-            board.GrantMembership(requestingUserId, clock.UtcNow);
-            await boardRepository.AddMemberAsync(board.Id, requestingUserId, cancellationToken);
+            var grantedAt = clock.UtcNow;
+            board.GrantMembership(requestingUserId, grantedAt);
+            await boardRepository.AddMemberAsync(board.Id, requestingUserId, grantedAt, cancellationToken);
         }
 
-        var membership = board.Memberships.First(m => m.UserId == requestingUserId);
+        var membership = board.FindActiveMembership(requestingUserId)!; // just granted above if it wasn't already present
         return Result.Success(MembershipResult.FromDomain(board.Id, membership));
     }
 
