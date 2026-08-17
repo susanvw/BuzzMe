@@ -201,4 +201,34 @@ public sealed class BoardApplicationService(
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.3 — Authorization: Board Owner. The confirmation-token
+    /// UX IMPLEMENTATION_SPEC.md §2 names ("explicit confirmation... naming the Board") is
+    /// client-side only — API_CONTRACT.md §5's own Delete Board row states it explicitly:
+    /// "confirmation handled client-side before calling; no body needed since the path ID +
+    /// Owner check is the safeguard." GetByIdIncludingDeletedAsync (not the deleted-excluding
+    /// GetByIdAsync every other method here uses) is what makes the idempotency check below
+    /// reachable — same "existence check must survive the state it's checking for" shape as
+    /// LeaveBoardAsync's own Sprint 10 fix. Owner authorization is checked before the
+    /// idempotency short-circuit, matching RemoveMemberAsync's ordering: a non-Owner never
+    /// learns whether an already-deleted Board was deleted via a different response.
+    /// </summary>
+    public async Task<Result> DeleteBoardAsync(Guid requestingUserId, Guid boardId, CancellationToken cancellationToken)
+    {
+        var board = await boardRepository.GetByIdIncludingDeletedAsync(new BoardId(boardId), cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure(Error.NotFound("Board not found."));
+
+        if (board.OwnerUserId != requestingUserId)
+            return Result.Failure(Error.Forbidden("Only the Board Owner may delete this Board."));
+
+        if (board.IsDeleted)
+            return Result.Success();
+
+        board.Delete(clock.UtcNow);
+        await boardRepository.UpdateAsync(board, cancellationToken);
+
+        return Result.Success();
+    }
 }

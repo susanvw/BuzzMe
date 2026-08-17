@@ -34,6 +34,15 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
         return document is null ? null : BoardMapper.ToDomain(document);
     }
 
+    public async Task<Board?> GetByIdIncludingDeletedAsync(BoardId id, CancellationToken cancellationToken)
+    {
+        var document = await Collection
+            .Find(Builders<BoardDocument>.Filter.Eq(d => d.Id, id.Value))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return document is null ? null : BoardMapper.ToDomain(document);
+    }
+
     public async Task<IReadOnlyList<Board>> ListByMemberAsync(
         Guid userId, Guid? afterId, int limit, CancellationToken cancellationToken)
     {

@@ -429,4 +429,76 @@ public sealed class BoardEndpointsTests : IClassFixture<BuzzMeApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task DeleteBoard_OwnerDeletesTheBoard_ReturnsNoContent()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.DeleteAsync($"/v1/boards/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var getResponse = await ownerClient.GetAsync($"/v1/boards/{created.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoard_CalledAgain_IsStillNoContent()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        await ownerClient.DeleteAsync($"/v1/boards/{created.Id}");
+
+        var response = await ownerClient.DeleteAsync($"/v1/boards/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoard_ByANonOwner_ReturnsForbidden()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var nonOwnerUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, nonOwnerUserId);
+        var nonOwnerClient = CreateAuthenticatedClient(nonOwnerUserId);
+
+        var response = await nonOwnerClient.DeleteAsync($"/v1/boards/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoard_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.DeleteAsync($"/v1/boards/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoard_ReturnsNotFoundForABoardThatDoesNotExist()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await client.DeleteAsync($"/v1/boards/{Guid.CreateVersion7()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteBoard_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.DeleteAsync($"/v1/boards/{Guid.CreateVersion7()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }

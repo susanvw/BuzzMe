@@ -7,7 +7,7 @@ using FluentValidation;
 
 namespace BuzzMe.Api.Endpoints;
 
-/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), Leave/Remove Member (Sprint 10), and List Members (Sprint 11).</summary>
+/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), Leave/Remove Member (Sprint 10), List Members (Sprint 11), and Delete Board (Sprint 13).</summary>
 public static class BoardEndpoints
 {
     public static IEndpointRouteBuilder MapBoardEndpoints(this IEndpointRouteBuilder app)
@@ -22,6 +22,7 @@ public static class BoardEndpoints
         group.MapPost("/{boardId:guid}/leave", LeaveBoardAsync);
         group.MapDelete("/{boardId:guid}/members/{userId:guid}", RemoveMemberAsync);
         group.MapGet("/{boardId:guid}/members", ListMembersAsync);
+        group.MapDelete("/{boardId:guid}", DeleteBoardAsync);
 
         return app;
     }
@@ -160,5 +161,18 @@ public static class BoardEndpoints
         }
 
         return Results.Json(result.Value.ToListResponse(), statusCode: StatusCodes.Status200OK);
+    }
+
+    private static async Task<IResult> DeleteBoardAsync(
+        Guid boardId, BoardApplicationService boardService, ICurrentUserContext currentUser, CancellationToken cancellationToken)
+    {
+        var result = await boardService.DeleteBoardAsync(currentUser.UserId, boardId, cancellationToken);
+        if (result.IsFailure)
+        {
+            var (statusCode, apiError) = result.Error.ToHttp();
+            return Results.Json(new ApiResponse<object>(null, apiError), statusCode: statusCode);
+        }
+
+        return Results.NoContent();
     }
 }

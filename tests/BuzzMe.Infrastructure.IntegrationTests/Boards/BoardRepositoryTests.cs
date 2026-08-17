@@ -225,4 +225,38 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
 
         Assert.DoesNotContain(results, b => b.Id == board.Id);
     }
+
+    [Fact]
+    public async Task GetByIdIncludingDeletedAsync_ReturnsADeletedBoard()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+        board.Delete(Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+
+        var reloaded = await _repository.GetByIdIncludingDeletedAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded.IsDeleted);
+    }
+
+    [Fact]
+    public async Task GetByIdIncludingDeletedAsync_ReturnsANonDeletedBoardToo()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        var reloaded = await _repository.GetByIdIncludingDeletedAsync(board.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.False(reloaded.IsDeleted);
+    }
+
+    [Fact]
+    public async Task GetByIdIncludingDeletedAsync_ReturnsNullForAnUnknownId()
+    {
+        var result = await _repository.GetByIdIncludingDeletedAsync(new BoardId(Guid.CreateVersion7()), CancellationToken.None);
+
+        Assert.Null(result);
+    }
 }

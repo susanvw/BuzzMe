@@ -5,7 +5,16 @@ public interface IBoardRepository
 {
     Task AddAsync(Board board, CancellationToken cancellationToken);
 
+    /// <summary>Excludes soft-deleted Boards — a deleted Board is "not found" for every normal read/write path. See GetByIdIncludingDeletedAsync for the one case that needs the distinction.</summary>
     Task<Board?> GetByIdAsync(BoardId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds a Board regardless of DeletedAt — mirrors IReminderRepository's exact
+    /// Sprint 3.1 pattern. DeleteBoard's own idempotency check needs this: API_CONTRACT.md
+    /// §5's "deleting an already-deleted Board is a no-op → 204" can't be told apart from
+    /// "this Board never existed" (→ 404) using the deleted-excluding GetByIdAsync alone.
+    /// </summary>
+    Task<Board?> GetByIdIncludingDeletedAsync(BoardId id, CancellationToken cancellationToken);
 
     /// <summary>
     /// Boards where the given User holds a Membership, ordered by Id (time-sortable —

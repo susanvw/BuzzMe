@@ -21,6 +21,9 @@ public sealed class InMemoryBoardRepository : IBoardRepository
     public Task<Board?> GetByIdAsync(BoardId id, CancellationToken cancellationToken) =>
         Task.FromResult(_boards.FirstOrDefault(board => board.Id == id && !board.IsDeleted));
 
+    public Task<Board?> GetByIdIncludingDeletedAsync(BoardId id, CancellationToken cancellationToken) =>
+        Task.FromResult(_boards.FirstOrDefault(board => board.Id == id));
+
     public Task<IReadOnlyList<Board>> ListByMemberAsync(
         Guid userId, Guid? afterId, int limit, CancellationToken cancellationToken)
     {

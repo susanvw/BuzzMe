@@ -474,4 +474,66 @@ public sealed class BoardApplicationServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("NOT_FOUND", result.Error.Code);
     }
+
+    [Fact]
+    public async Task DeleteBoardAsync_OwnerDeletesTheBoard_Succeeds()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.DeleteBoardAsync(ownerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var board = await _repository.GetByIdIncludingDeletedAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        Assert.True(board!.IsDeleted);
+    }
+
+    [Fact]
+    public async Task DeleteBoardAsync_CalledAgain_IsIdempotent()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        await _sut.DeleteBoardAsync(ownerUserId, created.Value.Id, CancellationToken.None);
+
+        var second = await _sut.DeleteBoardAsync(ownerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(second.IsSuccess);
+    }
+
+    [Fact]
+    public async Task DeleteBoardAsync_ReturnsForbiddenForANonOwner()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        var nonOwnerUserId = Guid.CreateVersion7();
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        board!.GrantMembership(nonOwnerUserId, _clock.UtcNow);
+
+        var result = await _sut.DeleteBoardAsync(nonOwnerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task DeleteBoardAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var strangerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.DeleteBoardAsync(strangerUserId, created.Value.Id, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task DeleteBoardAsync_ReturnsNotFoundForABoardThatDoesNotExist()
+    {
+        var result = await _sut.DeleteBoardAsync(Guid.CreateVersion7(), Guid.CreateVersion7(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
 }
