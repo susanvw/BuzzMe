@@ -159,6 +159,22 @@ public sealed class Board : AggregateRoot<BoardId>
     }
 
     /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.4 — a single-aggregate Board transaction changing the
+    /// Board's own name. Owner authorization is an Application-layer concern (every other
+    /// aggregate method here follows the same split). Idempotent: re-applying the
+    /// already-current name is a no-op, not an error (API_CONTRACT.md §5's own stated rule)
+    /// — only a genuine change raises BoardRenamed.
+    /// </summary>
+    public void Rename(BoardName name, DateTimeOffset renamedAt)
+    {
+        if (Name == name)
+            return;
+
+        Name = name;
+        Raise(new BoardRenamed(Guid.CreateVersion7(), renamedAt, Id, name));
+    }
+
+    /// <summary>
     /// APPLICATION_LAYER_SPEC.md §3.4 — a single-aggregate Board transaction updating the
     /// requester's own Membership's `Muted` flag; never anyone else's, never the Board's
     /// own content. Idempotent: setting an already-current mute state is a no-op, not an

@@ -383,4 +383,28 @@ public sealed class BoardTests
         Assert.Equal(Now, board.DeletedAt);
         Assert.Single(board.DomainEvents.OfType<BoardDeleted>());
     }
+
+    [Fact]
+    public void Rename_ChangesTheNameAndRaisesBoardRenamed()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var board = Board.Create(boardId, new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        board.Rename(new BoardName("The Smiths"), Now);
+
+        Assert.Equal("The Smiths", board.Name.Value);
+        var raised = Assert.Single(board.DomainEvents.OfType<BoardRenamed>());
+        Assert.Equal(boardId, raised.BoardId);
+        Assert.Equal("The Smiths", raised.Name.Value);
+    }
+
+    [Fact]
+    public void Rename_ToTheAlreadyCurrentName_IsIdempotent()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        board.Rename(new BoardName("Family"), Now);
+
+        Assert.Empty(board.DomainEvents.OfType<BoardRenamed>());
+    }
 }

@@ -28,6 +28,29 @@ public sealed class BoardApplicationService(
     }
 
     /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.4 — Authorization: Board Owner. Idempotency (re-applying
+    /// the already-current name) is defended by the aggregate itself (Board.Rename), not
+    /// re-checked here as an early-return — there is no observable difference between a
+    /// no-op and a genuine rename from this method's own point of view, unlike Mute's need
+    /// to skip a targeted repository write entirely.
+    /// </summary>
+    public async Task<Result<BoardResult>> RenameBoardAsync(
+        Guid requestingUserId, Guid boardId, string name, CancellationToken cancellationToken)
+    {
+        var board = await boardRepository.GetByIdAsync(new BoardId(boardId), cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure<BoardResult>(Error.NotFound("Board not found."));
+
+        if (board.OwnerUserId != requestingUserId)
+            return Result.Failure<BoardResult>(Error.Forbidden("Only the Board Owner may rename this Board."));
+
+        board.Rename(new BoardName(name), clock.UtcNow);
+        await boardRepository.UpdateAsync(board, cancellationToken);
+
+        return Result.Success(BoardResult.FromDomain(board));
+    }
+
+    /// <summary>
     /// API_CONTRACT.md §5 — Authorization: Board Member. A Board the requester doesn't
     /// belong to is reported identically to one that doesn't exist (§1 Principle 6 —
     /// never confirm existence to someone who can't see it).

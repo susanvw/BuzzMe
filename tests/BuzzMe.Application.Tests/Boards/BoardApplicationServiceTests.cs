@@ -536,4 +536,67 @@ public sealed class BoardApplicationServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("NOT_FOUND", result.Error.Code);
     }
+
+    [Fact]
+    public async Task RenameBoardAsync_OwnerRenamesTheBoard_Succeeds()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.RenameBoardAsync(ownerUserId, created.Value.Id, "The Smiths", CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("The Smiths", result.Value.Name);
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        Assert.Equal("The Smiths", board!.Name.Value);
+    }
+
+    [Fact]
+    public async Task RenameBoardAsync_ToTheAlreadyCurrentName_IsIdempotent()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.RenameBoardAsync(ownerUserId, created.Value.Id, "Family", CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Family", result.Value.Name);
+    }
+
+    [Fact]
+    public async Task RenameBoardAsync_ReturnsForbiddenForANonOwner()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+        var nonOwnerUserId = Guid.CreateVersion7();
+        var board = await _repository.GetByIdAsync(new BoardId(created.Value.Id), CancellationToken.None);
+        board!.GrantMembership(nonOwnerUserId, _clock.UtcNow);
+
+        var result = await _sut.RenameBoardAsync(nonOwnerUserId, created.Value.Id, "Renamed", CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task RenameBoardAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var strangerUserId = Guid.CreateVersion7();
+        var created = await _sut.CreateBoardAsync(ownerUserId, "Family", CancellationToken.None);
+
+        var result = await _sut.RenameBoardAsync(strangerUserId, created.Value.Id, "Renamed", CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task RenameBoardAsync_ReturnsNotFoundForABoardThatDoesNotExist()
+    {
+        var result = await _sut.RenameBoardAsync(Guid.CreateVersion7(), Guid.CreateVersion7(), "Renamed", CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
 }

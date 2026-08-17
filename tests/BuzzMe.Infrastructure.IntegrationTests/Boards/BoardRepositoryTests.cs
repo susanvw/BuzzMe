@@ -259,4 +259,18 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
 
         Assert.Null(result);
     }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsARename()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        board.Rename(new BoardName("The Smiths"), Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+        Assert.NotNull(reloaded);
+        Assert.Equal("The Smiths", reloaded.Name.Value);
+    }
 }

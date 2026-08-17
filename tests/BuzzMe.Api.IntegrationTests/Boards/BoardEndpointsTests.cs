@@ -501,4 +501,78 @@ public sealed class BoardEndpointsTests : IClassFixture<BuzzMeApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task RenameBoard_OwnerRenamesTheBoard_ReturnsTheUpdatedBoard()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.PatchAsJsonAsync($"/v1/boards/{created.Id}", new RenameBoardRequest("The Smiths"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<BoardResponse>>();
+        Assert.Equal("The Smiths", body?.Data?.Name);
+    }
+
+    [Fact]
+    public async Task RenameBoard_ToTheAlreadyCurrentName_IsStillOk()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.PatchAsJsonAsync($"/v1/boards/{created.Id}", new RenameBoardRequest("Family"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenameBoard_WithAnEmptyName_ReturnsValidationError()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+
+        var response = await ownerClient.PatchAsJsonAsync($"/v1/boards/{created.Id}", new RenameBoardRequest(""));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<BoardResponse>>();
+        Assert.Equal(ErrorCode.ValidationError, body?.Error?.Code);
+    }
+
+    [Fact]
+    public async Task RenameBoard_ByANonOwner_ReturnsForbidden()
+    {
+        var ownerUserId = Guid.CreateVersion7();
+        var ownerClient = CreateAuthenticatedClient(ownerUserId);
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var nonOwnerUserId = Guid.CreateVersion7();
+        await AddMemberDirectlyAsync(created.Id, nonOwnerUserId);
+        var nonOwnerClient = CreateAuthenticatedClient(nonOwnerUserId);
+
+        var response = await nonOwnerClient.PatchAsJsonAsync($"/v1/boards/{created.Id}", new RenameBoardRequest("Renamed"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenameBoard_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var created = await CreateBoardAsync(ownerClient, "Family");
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.PatchAsJsonAsync($"/v1/boards/{created.Id}", new RenameBoardRequest("Renamed"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenameBoard_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PatchAsJsonAsync($"/v1/boards/{Guid.CreateVersion7()}", new RenameBoardRequest("Renamed"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }

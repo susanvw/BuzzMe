@@ -7,7 +7,7 @@ using FluentValidation;
 
 namespace BuzzMe.Api.Endpoints;
 
-/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), Leave/Remove Member (Sprint 10), List Members (Sprint 11), and Delete Board (Sprint 13).</summary>
+/// <summary>API_CONTRACT.md §5 — Board APIs: Create, Get, List, Mute/Unmute (Sprint 7), Leave/Remove Member (Sprint 10), List Members (Sprint 11), Delete Board (Sprint 13), and Rename Board (Sprint 14).</summary>
 public static class BoardEndpoints
 {
     public static IEndpointRouteBuilder MapBoardEndpoints(this IEndpointRouteBuilder app)
@@ -17,6 +17,7 @@ public static class BoardEndpoints
         group.MapPost("", CreateBoardAsync);
         group.MapGet("/{boardId:guid}", GetBoardAsync);
         group.MapGet("", ListBoardsAsync);
+        group.MapPatch("/{boardId:guid}", RenameBoardAsync);
         group.MapPost("/{boardId:guid}/mute", MuteBoardAsync);
         group.MapPost("/{boardId:guid}/unmute", UnmuteBoardAsync);
         group.MapPost("/{boardId:guid}/leave", LeaveBoardAsync);
@@ -87,6 +88,32 @@ public static class BoardEndpoints
         }
 
         return Results.Json(result.Value.ToListResponse(), statusCode: StatusCodes.Status200OK);
+    }
+
+    private static async Task<IResult> RenameBoardAsync(
+        Guid boardId,
+        RenameBoardRequest request,
+        IValidator<RenameBoardRequest> validator,
+        BoardApplicationService boardService,
+        ICurrentUserContext currentUser,
+        CancellationToken cancellationToken)
+    {
+        var validation = await validator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+        {
+            var validationError = new ApiError(
+                ErrorCode.ValidationError, "Validation failed.", validation.Errors.Select(e => e.ErrorMessage).ToList());
+            return Results.Json(new ApiResponse<BoardResponse>(null, validationError), statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await boardService.RenameBoardAsync(currentUser.UserId, boardId, request.Name, cancellationToken);
+        if (result.IsFailure)
+        {
+            var (statusCode, apiError) = result.Error.ToHttp();
+            return Results.Json(new ApiResponse<BoardResponse>(null, apiError), statusCode: statusCode);
+        }
+
+        return Results.Json(new ApiResponse<BoardResponse>(result.Value.ToResponse(), null), statusCode: StatusCodes.Status200OK);
     }
 
     private static async Task<IResult> MuteBoardAsync(
