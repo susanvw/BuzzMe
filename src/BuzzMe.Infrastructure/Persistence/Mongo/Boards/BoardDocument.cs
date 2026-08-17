@@ -20,5 +20,8 @@ public sealed class BoardDocument
 
     public required List<MembershipDocument> Memberships { get; init; }
 
+    /// <summary>Null = active. Soft delete — IMPLEMENTATION_SPEC.md §1, same pattern as ReminderDocument.DeletedAt (Sprint 3.1).</summary>
+    public DateTimeOffset? DeletedAt { get; init; }
+
     public required long Version { get; init; }
 }

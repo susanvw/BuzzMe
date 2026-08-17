@@ -11,6 +11,7 @@ internal static class BoardMapper
         Name = board.Name.Value,
         CreatedAt = board.CreatedAt,
         Memberships = board.Memberships.Select(ToDocument).ToList(),
+        DeletedAt = board.DeletedAt,
         Version = board.Version,
     };
 
@@ -28,6 +29,7 @@ internal static class BoardMapper
         new BoardName(document.Name),
         document.CreatedAt,
         document.Memberships.Select(ToDomain),
+        document.DeletedAt,
         document.Version);
 
     private static Membership ToDomain(MembershipDocument document) =>

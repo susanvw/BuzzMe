@@ -357,4 +357,30 @@ public sealed class BoardTests
 
         Assert.Equal("Family", name.Value);
     }
+
+    [Fact]
+    public void Delete_SetsDeletedAtAndRaisesBoardDeleted()
+    {
+        var boardId = new BoardId(Guid.CreateVersion7());
+        var board = Board.Create(boardId, new BoardName("Family"), Guid.CreateVersion7(), Now);
+
+        board.Delete(Now);
+
+        Assert.True(board.IsDeleted);
+        Assert.Equal(Now, board.DeletedAt);
+        var raised = Assert.Single(board.DomainEvents.OfType<BoardDeleted>());
+        Assert.Equal(boardId, raised.BoardId);
+    }
+
+    [Fact]
+    public void Delete_IsIdempotent()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+        board.Delete(Now);
+
+        board.Delete(Now.AddDays(1));
+
+        Assert.Equal(Now, board.DeletedAt);
+        Assert.Single(board.DomainEvents.OfType<BoardDeleted>());
+    }
 }

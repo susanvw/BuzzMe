@@ -198,6 +198,25 @@ public sealed class User : AggregateRoot<UserId>
         Raise(new ProfileUpdated(Guid.CreateVersion7(), updatedAt, Id));
     }
 
+    /// <summary>
+    /// IMPLEMENTATION_SPEC.md §2's ConfirmAccountDeletion — the terminal transition; "any
+    /// non-Deleted state → Deleted" (UserStatus.cs's own lifecycle comment). A pure state
+    /// transition, same division of responsibility as Verify: the Application layer's
+    /// DeleteAccountAsync owns the multi-aggregate orchestration this triggers (per-Board
+    /// ReassignOwnership/removal, session revocation — APPLICATION_LAYER_SPEC.md §7) and the
+    /// already-Deleted idempotency short-circuit ("re-confirming an already-Deleted account
+    /// is a no-op") before ever calling this.
+    /// </summary>
+    public void Delete(DateTimeOffset deletedAt)
+    {
+        if (Status == UserStatus.Deleted)
+            return;
+
+        Status = UserStatus.Deleted;
+
+        Raise(new AccountDeleted(Guid.CreateVersion7(), deletedAt, Id));
+    }
+
     internal static User Rehydrate(
         UserId id, string? email, string? phone, DisplayName displayName, string? photoUrl, string passwordHash,
         BoardId? personalBoardId, UserStatus status, DateTimeOffset createdAt,

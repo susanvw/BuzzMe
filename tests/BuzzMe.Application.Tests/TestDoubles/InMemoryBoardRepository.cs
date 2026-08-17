@@ -19,12 +19,13 @@ public sealed class InMemoryBoardRepository : IBoardRepository
     }
 
     public Task<Board?> GetByIdAsync(BoardId id, CancellationToken cancellationToken) =>
-        Task.FromResult(_boards.FirstOrDefault(board => board.Id == id));
+        Task.FromResult(_boards.FirstOrDefault(board => board.Id == id && !board.IsDeleted));
 
     public Task<IReadOnlyList<Board>> ListByMemberAsync(
         Guid userId, Guid? afterId, int limit, CancellationToken cancellationToken)
     {
-        var query = _boards.Where(board => board.HasMember(userId));
+        // Not-deleted filtered (Sprint 12) — mirrors BoardRepository's own NotDeletedFilter.
+        var query = _boards.Where(board => !board.IsDeleted && board.HasMember(userId));
 
         if (afterId is { } cursor)
             query = query.Where(board => board.Id.Value.CompareTo(cursor) > 0);

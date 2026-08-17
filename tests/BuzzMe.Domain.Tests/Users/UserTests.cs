@@ -310,4 +310,27 @@ public sealed class UserTests
     {
         Assert.False(UserStatusCodes.TryParse("banned", out _));
     }
+
+    [Fact]
+    public void Delete_TransitionsToDeletedAndRaisesAccountDeleted()
+    {
+        var user = NewActiveUser();
+
+        user.Delete(Now);
+
+        Assert.Equal(UserStatus.Deleted, user.Status);
+        var raised = Assert.Single(user.DomainEvents.OfType<AccountDeleted>());
+        Assert.Equal(user.Id, raised.UserId);
+    }
+
+    [Fact]
+    public void Delete_IsIdempotent()
+    {
+        var user = NewActiveUser();
+        user.Delete(Now);
+
+        user.Delete(Now.AddDays(1));
+
+        Assert.Single(user.DomainEvents.OfType<AccountDeleted>());
+    }
 }

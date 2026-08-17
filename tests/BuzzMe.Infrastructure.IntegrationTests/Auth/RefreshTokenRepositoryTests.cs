@@ -26,8 +26,8 @@ public sealed class RefreshTokenRepositoryTests(MongoIntegrationTestFixture fixt
     // UniqueEmail/UniquePhone.
     private static string UniqueTokenHash() => Guid.CreateVersion7().ToString();
 
-    private static RefreshToken NewToken(string? tokenHash = null, DateTimeOffset? expiresAt = null) => RefreshToken.Issue(
-        new RefreshTokenId(Guid.CreateVersion7()), Guid.CreateVersion7(), tokenHash ?? UniqueTokenHash(), expiresAt ?? Now + TimeSpan.FromDays(30), Now);
+    private static RefreshToken NewToken(string? tokenHash = null, DateTimeOffset? expiresAt = null, Guid? userId = null) => RefreshToken.Issue(
+        new RefreshTokenId(Guid.CreateVersion7()), userId ?? Guid.CreateVersion7(), tokenHash ?? UniqueTokenHash(), expiresAt ?? Now + TimeSpan.FromDays(30), Now);
 
     [Fact]
     public async Task AddAsync_PersistsTheTokenAtVersionZero()
@@ -76,5 +76,43 @@ public sealed class RefreshTokenRepositoryTests(MongoIntegrationTestFixture fixt
         Assert.NotNull(reloaded);
         Assert.NotNull(reloaded.RevokedAt);
         Assert.False(reloaded.IsValid(Now));
+    }
+
+    [Fact]
+    public async Task RevokeAllForUserAsync_RevokesOnlyThatUsersOutstandingTokens()
+    {
+        var userId = Guid.CreateVersion7();
+        var otherUserId = Guid.CreateVersion7();
+        var tokenHash1 = UniqueTokenHash();
+        var tokenHash2 = UniqueTokenHash();
+        var otherUsersTokenHash = UniqueTokenHash();
+        await _repository.AddAsync(NewToken(tokenHash: tokenHash1, userId: userId), CancellationToken.None);
+        await _repository.AddAsync(NewToken(tokenHash: tokenHash2, userId: userId), CancellationToken.None);
+        await _repository.AddAsync(NewToken(tokenHash: otherUsersTokenHash, userId: otherUserId), CancellationToken.None);
+
+        await _repository.RevokeAllForUserAsync(userId, Now.AddDays(1), CancellationToken.None);
+
+        var token1 = await _repository.GetByTokenHashAsync(tokenHash1, CancellationToken.None);
+        var token2 = await _repository.GetByTokenHashAsync(tokenHash2, CancellationToken.None);
+        var otherToken = await _repository.GetByTokenHashAsync(otherUsersTokenHash, CancellationToken.None);
+        Assert.False(token1!.IsValid(Now.AddDays(1)));
+        Assert.False(token2!.IsValid(Now.AddDays(1)));
+        Assert.True(otherToken!.IsValid(Now.AddDays(1)));
+    }
+
+    [Fact]
+    public async Task RevokeAllForUserAsync_DoesNotReRevokeAnAlreadyRevokedTokensTimestamp()
+    {
+        var userId = Guid.CreateVersion7();
+        var tokenHash = UniqueTokenHash();
+        var token = NewToken(tokenHash: tokenHash, userId: userId);
+        await _repository.AddAsync(token, CancellationToken.None);
+        token.Revoke(Now);
+        await _repository.UpdateAsync(token, CancellationToken.None);
+
+        await _repository.RevokeAllForUserAsync(userId, Now.AddDays(1), CancellationToken.None);
+
+        var reloaded = await _repository.GetByTokenHashAsync(tokenHash, CancellationToken.None);
+        Assert.Equal(Now, reloaded!.RevokedAt);
     }
 }

@@ -1,6 +1,7 @@
 using BuzzMe.Application.Auth;
 using BuzzMe.Application.Tests.TestDoubles;
 using BuzzMe.Domain.Boards;
+using BuzzMe.Domain.Users;
 
 namespace BuzzMe.Application.Tests.Auth;
 
@@ -283,5 +284,102 @@ public sealed class AuthApplicationServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("UNAUTHORIZED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_MarksTheUserDeleted()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        await VerifyRegisteredUserAsync("alice@example.com", null);
+
+        var result = await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var user = await _userRepository.GetByIdAsync(new UserId(userId), CancellationToken.None);
+        Assert.Equal(UserStatus.Deleted, user!.Status);
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_DeletesThePersonalBoard()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        var verified = await _sut.VerifyAccountAsync("alice@example.com", null, FakeVerificationCodeGenerator.Code, CancellationToken.None);
+        var personalBoardId = verified.Value.User.PersonalBoardId!.Value;
+
+        await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        var board = await _boardRepository.GetByIdAsync(new BoardId(personalBoardId), CancellationToken.None);
+        Assert.Null(board);
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_ReassignsOwnershipForASharedBoardWithOtherActiveMembers()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        await VerifyRegisteredUserAsync("alice@example.com", null);
+        var successorUserId = Guid.CreateVersion7();
+        var sharedBoard = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), userId, _clock.UtcNow);
+        sharedBoard.GrantMembership(successorUserId, _clock.UtcNow);
+        await _boardRepository.AddAsync(sharedBoard, CancellationToken.None);
+
+        await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        var reloaded = await _boardRepository.GetByIdAsync(sharedBoard.Id, CancellationToken.None);
+        Assert.NotNull(reloaded);
+        Assert.Equal(successorUserId, reloaded.OwnerUserId);
+        Assert.False(reloaded.HasMember(userId));
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_RemovesMembershipForASharedBoardTheyDoNotOwn()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        await VerifyRegisteredUserAsync("alice@example.com", null);
+        var ownerUserId = Guid.CreateVersion7();
+        var sharedBoard = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Team"), ownerUserId, _clock.UtcNow);
+        sharedBoard.GrantMembership(userId, _clock.UtcNow);
+        await _boardRepository.AddAsync(sharedBoard, CancellationToken.None);
+
+        await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        var reloaded = await _boardRepository.GetByIdAsync(sharedBoard.Id, CancellationToken.None);
+        Assert.NotNull(reloaded);
+        Assert.False(reloaded.IsDeleted);
+        Assert.Equal(ownerUserId, reloaded.OwnerUserId);
+        Assert.False(reloaded.HasMember(userId));
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_RevokesOutstandingRefreshTokens()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        var verified = await _sut.VerifyAccountAsync("alice@example.com", null, FakeVerificationCodeGenerator.Code, CancellationToken.None);
+
+        await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        var refreshResult = await _sut.RefreshTokenAsync(verified.Value.RefreshToken, CancellationToken.None);
+        Assert.True(refreshResult.IsFailure);
+        Assert.Equal("UNAUTHORIZED", refreshResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_CalledAgain_IsIdempotent()
+    {
+        var userId = await RegisterAsync(email: "alice@example.com");
+        await VerifyRegisteredUserAsync("alice@example.com", null);
+        await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        var result = await _sut.DeleteAccountAsync(userId, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task DeleteAccountAsync_ReturnsNotFoundForANonexistentUser()
+    {
+        var result = await _sut.DeleteAccountAsync(Guid.CreateVersion7(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
     }
 }

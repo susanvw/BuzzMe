@@ -18,6 +18,11 @@ public sealed class Board : AggregateRoot<BoardId>
 
     public IReadOnlyCollection<Membership> Memberships => _memberships.AsReadOnly();
 
+    /// <summary>Soft delete — IMPLEMENTATION_SPEC.md §1: "Deleted is internally soft (see §4, Purge policy) but user-facing behavior is simply 'gone.'" Same pattern as Reminder.DeletedAt (Sprint 3.1): null = active, no new lifecycle enum introduced.</summary>
+    public DateTimeOffset? DeletedAt { get; private set; }
+
+    public bool IsDeleted => DeletedAt is not null;
+
     /// <summary>Derived, not stored — IMPLEMENTATION_SPEC.md §5 invariant 3 guarantees exactly one **Active** Owner Membership always exists. Historical (Removed/Left) rows may still carry `Role = Owner` as a record of what they once held, so the Active filter is load-bearing, not defensive noise.</summary>
     public Guid OwnerUserId => _memberships.Single(membership => membership.Role == MembershipRole.Owner && membership.Status == MembershipStatus.Active).UserId;
 
@@ -47,9 +52,10 @@ public sealed class Board : AggregateRoot<BoardId>
     /// happened. Internal: only the Infrastructure Mapper that persisted this Board in the
     /// first place is trusted to rehydrate it (DEVELOPMENT_GUIDE.md §3/§4).
     /// </summary>
-    internal static Board Rehydrate(BoardId id, BoardName name, DateTimeOffset createdAt, IEnumerable<Membership> memberships, long version)
+    internal static Board Rehydrate(
+        BoardId id, BoardName name, DateTimeOffset createdAt, IEnumerable<Membership> memberships, DateTimeOffset? deletedAt, long version)
     {
-        var board = new Board(id, name) { CreatedAt = createdAt };
+        var board = new Board(id, name) { CreatedAt = createdAt, DeletedAt = deletedAt };
         board._memberships.AddRange(memberships);
         board.Version = version;
         return board;
@@ -129,6 +135,27 @@ public sealed class Board : AggregateRoot<BoardId>
 
         membership.MarkRemoved();
         Raise(new MemberRemoved(Guid.CreateVersion7(), removedAt, Id, targetUserId, removedByUserId));
+    }
+
+    /// <summary>
+    /// IMPLEMENTATION_SPEC.md §2's DeleteBoard: "soft-deletes immediately (user-facing:
+    /// gone); schedules the async Purge policy (§4)" — this method is exactly the first
+    /// half (the soft delete itself); no Purge background worker exists yet (see
+    /// SPRINT_12_REPORT.md). Authorization (Board Owner) and the confirmation-token UX
+    /// IMPLEMENTATION_SPEC.md §2 also names for DeleteBoard are Application/Api-layer
+    /// concerns for whichever use case calls this — this sprint's only caller is
+    /// DeleteAccount's own orchestration (IMPLEMENTATION_SPEC.md §4's ReassignOwnership
+    /// policy: "if no other Active Member exists... the Board is deleted instead, not left
+    /// ownerless"), which has already confirmed at the account level. Idempotent: deleting
+    /// an already-deleted Board is a no-op (API_CONTRACT.md §5's stated rule for DeleteBoard).
+    /// </summary>
+    public void Delete(DateTimeOffset deletedAt)
+    {
+        if (IsDeleted)
+            return;
+
+        DeletedAt = deletedAt;
+        Raise(new BoardDeleted(Guid.CreateVersion7(), deletedAt, Id));
     }
 
     /// <summary>

@@ -13,6 +13,10 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
 {
     private IMongoCollection<BoardDocument> Collection => context.Database.GetCollection<BoardDocument>("boards");
 
+    /// <summary>Sprint 12 — mirrors ReminderRepository's own NotDeletedFilter exactly: a soft-deleted Board reads as gone everywhere, not merely "unreachable through the aggregate's own Memberships."</summary>
+    private static readonly FilterDefinition<BoardDocument> NotDeletedFilter =
+        Builders<BoardDocument>.Filter.Eq(d => d.DeletedAt, null);
+
     public async Task AddAsync(Board board, CancellationToken cancellationToken)
     {
         // Insert-only for this sprint: nothing yet updates an existing Board, so there is
@@ -23,9 +27,9 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
 
     public async Task<Board?> GetByIdAsync(BoardId id, CancellationToken cancellationToken)
     {
-        var document = await Collection
-            .Find(Builders<BoardDocument>.Filter.Eq(d => d.Id, id.Value))
-            .FirstOrDefaultAsync(cancellationToken);
+        var filter = Builders<BoardDocument>.Filter.Eq(d => d.Id, id.Value) & NotDeletedFilter;
+
+        var document = await Collection.Find(filter).FirstOrDefaultAsync(cancellationToken);
 
         return document is null ? null : BoardMapper.ToDomain(document);
     }
@@ -34,7 +38,7 @@ public sealed class BoardRepository(MongoContext context) : IBoardRepository
         Guid userId, Guid? afterId, int limit, CancellationToken cancellationToken)
     {
         var filter = Builders<BoardDocument>.Filter.ElemMatch(
-            d => d.Memberships, m => m.UserId == userId && m.Status == nameof(MembershipStatus.Active));
+            d => d.Memberships, m => m.UserId == userId && m.Status == nameof(MembershipStatus.Active)) & NotDeletedFilter;
         if (afterId is { } cursor)
             filter &= Builders<BoardDocument>.Filter.Gt(d => d.Id, cursor);
 

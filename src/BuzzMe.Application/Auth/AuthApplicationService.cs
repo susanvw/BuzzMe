@@ -12,11 +12,11 @@ namespace BuzzMe.Application.Auth;
 
 /// <summary>
 /// One Application Service for the Auth bounded-context area — APPLICATION_LAYER_SPEC.md
-/// §3.10's Register/VerifyAccount/Login/RefreshToken/ForgotPassword/ResetPassword. Sprint 9
-/// builds the real, two-phase credential lifecycle IMPLEMENTATION_SPEC.md §2 specifies,
-/// superseding Sprint 8's UserApplicationService.ProvisionAccountAsync shortcut (removed).
-/// DeleteAccount stays out of scope — it needs Board ownership reassignment, which no sprint
-/// has built yet (see SPRINT_8_REPORT.md §3.2, still open, and SPRINT_9_REPORT.md).
+/// §3.10's Register/VerifyAccount/Login/RefreshToken/ForgotPassword/ResetPassword/
+/// DeleteAccount. Sprint 9 builds the real, two-phase credential lifecycle IMPLEMENTATION_SPEC.md
+/// §2 specifies, superseding Sprint 8's UserApplicationService.ProvisionAccountAsync shortcut
+/// (removed). DeleteAccount (Sprint 12) was the last of these to land — it needed Board
+/// ownership reassignment (Sprint 10) as a real prerequisite, not an optional nicety.
 /// </summary>
 public sealed class AuthApplicationService(
     IUserRepository userRepository,
@@ -200,6 +200,63 @@ public sealed class AuthApplicationService(
             return Result.Failure(Error.Unauthorized("Reset token is invalid, expired, or already used."));
 
         user.ResetPassword(passwordHasher.Hash(newPassword), now);
+        await userRepository.UpdateAsync(user, cancellationToken);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// IMPLEMENTATION_SPEC.md §2's ConfirmAccountDeletion — APPLICATION_LAYER_SPEC.md §7's
+    /// "multi-aggregate orchestrated workflow": for each Board the requester belongs to,
+    /// resolve their Membership (reassign-and-leave if sole Owner with other Active Members;
+    /// delete the Board outright if sole Owner with none — IMPLEMENTATION_SPEC.md §4's
+    /// ReassignOwnership policy's own stated fallback; otherwise just leave via RemoveMember,
+    /// since a non-Owner Membership never blocks anything), each persisted independently
+    /// before the next Board is touched — same "sequential, any failed step retried before
+    /// the next proceeds" shape as every other multi-aggregate workflow in this codebase
+    /// (no saga infrastructure exists, see VerifyAccountAsync's own doc comment). Then revokes
+    /// every outstanding session and marks the User Deleted. Anonymizing authorship on shared
+    /// Boards' History and the async Purge of the Personal Board's actual content are NOT
+    /// done here — see SPRINT_12_REPORT.md's gaps (no History/audit entity exists anywhere in
+    /// this codebase, and no Purge background worker has ever been built, for any aggregate).
+    /// </summary>
+    public async Task<Result> DeleteAccountAsync(Guid requestingUserId, CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByIdAsync(new UserId(requestingUserId), cancellationToken);
+        if (user is null)
+            return Result.Failure(Error.NotFound("User not found."));
+
+        if (user.Status == UserStatus.Deleted)
+            return Result.Success();
+
+        var now = clock.UtcNow;
+
+        // DOMAIN_MODEL.md's family/team scale (same reasoning as ListMembersAsync's
+        // in-memory pagination, Sprint 11) — one generous page is always enough in practice
+        // for "every Board a single person belongs to."
+        var boards = await boardRepository.ListByMemberAsync(requestingUserId, afterId: null, limit: 1000, cancellationToken);
+
+        foreach (var board in boards)
+        {
+            if (board.OwnerUserId == requestingUserId)
+            {
+                var hasOtherActiveMembers = board.Memberships.Any(m => m.Status == MembershipStatus.Active && m.UserId != requestingUserId);
+                if (hasOtherActiveMembers)
+                    board.Leave(requestingUserId, now);
+                else
+                    board.Delete(now);
+            }
+            else
+            {
+                board.RemoveMember(requestingUserId, now, requestingUserId);
+            }
+
+            await boardRepository.UpdateAsync(board, cancellationToken);
+        }
+
+        await refreshTokenRepository.RevokeAllForUserAsync(requestingUserId, now, cancellationToken);
+
+        user.Delete(now);
         await userRepository.UpdateAsync(user, cancellationToken);
 
         return Result.Success();

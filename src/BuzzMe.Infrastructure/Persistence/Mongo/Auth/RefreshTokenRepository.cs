@@ -30,4 +30,13 @@ public sealed class RefreshTokenRepository(MongoContext context) : IRefreshToken
             RefreshTokenMapper.ToDocument(refreshToken),
             cancellationToken: cancellationToken);
     }
+
+    public async Task RevokeAllForUserAsync(Guid userId, DateTimeOffset revokedAt, CancellationToken cancellationToken)
+    {
+        var filter = Builders<RefreshTokenDocument>.Filter.Eq(d => d.UserId, userId)
+            & Builders<RefreshTokenDocument>.Filter.Eq(d => d.RevokedAt, null);
+        var update = Builders<RefreshTokenDocument>.Update.Set(d => d.RevokedAt, revokedAt);
+
+        await Collection.UpdateManyAsync(filter, update, cancellationToken: cancellationToken);
+    }
 }

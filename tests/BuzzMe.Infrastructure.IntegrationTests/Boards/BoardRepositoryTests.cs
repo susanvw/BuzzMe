@@ -198,4 +198,31 @@ public sealed class BoardRepositoryTests(MongoIntegrationTestFixture fixture) : 
 
         Assert.DoesNotContain(results, b => b.Id == board.Id);
     }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsADelete()
+    {
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), Guid.CreateVersion7(), Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+
+        board.Delete(Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+
+        var reloaded = await _repository.GetByIdAsync(board.Id, CancellationToken.None);
+        Assert.Null(reloaded);
+    }
+
+    [Fact]
+    public async Task ListByMemberAsync_ExcludesADeletedBoard()
+    {
+        var userId = Guid.CreateVersion7();
+        var board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), userId, Now);
+        await _repository.AddAsync(board, CancellationToken.None);
+        board.Delete(Now.AddDays(1));
+        await _repository.UpdateAsync(board, CancellationToken.None);
+
+        var results = await _repository.ListByMemberAsync(userId, afterId: null, limit: 20, CancellationToken.None);
+
+        Assert.DoesNotContain(results, b => b.Id == board.Id);
+    }
 }

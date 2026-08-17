@@ -257,4 +257,111 @@ public sealed class AuthEndpointsTests : IClassFixture<BuzzMeApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    private async Task<(string Email, string AccessToken, string RefreshToken)> RegisterAndVerifyWithTokensAsync(
+        HttpClient client, string password = "hunter22")
+    {
+        var (userId, email) = await RegisterAsync(client, password);
+        var code = await ReadVerificationCodeAsync(userId);
+        var response = await client.PostAsJsonAsync("/v1/auth/verify", new VerifyAccountRequest(email, null, code));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<AuthResponse>>();
+        return (email, body!.Data!.AccessToken, body.Data.RefreshToken);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_ReturnsNoContent()
+    {
+        var client = _factory.CreateClient();
+        var (_, accessToken, _) = await RegisterAndVerifyWithTokensAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_WithoutConfirmation_ReturnsValidationError()
+    {
+        var client = _factory.CreateClient();
+        var (_, accessToken, _) = await RegisterAndVerifyWithTokensAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(false)),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        Assert.Equal(ErrorCode.ValidationError, body?.Error?.Code);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_PreventsFutureLogin()
+    {
+        var client = _factory.CreateClient();
+        var (email, accessToken, _) = await RegisterAndVerifyWithTokensAsync(client, password: "hunter22");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        var loginResponse = await _factory.CreateClient().PostAsJsonAsync("/v1/auth/login", new LoginRequest(email, null, "hunter22"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, loginResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_RevokesTheRefreshToken()
+    {
+        var client = _factory.CreateClient();
+        var (_, accessToken, refreshToken) = await RegisterAndVerifyWithTokensAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync("/v1/auth/refresh-token", new RefreshTokenRequest(refreshToken));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_CalledAgain_IsStillNoContent()
+    {
+        var client = _factory.CreateClient();
+        var (_, accessToken, _) = await RegisterAndVerifyWithTokensAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/v1/users/me")
+        {
+            Content = JsonContent.Create(new DeleteAccountRequest(true)),
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }
