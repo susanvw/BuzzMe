@@ -1,5 +1,6 @@
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
 
@@ -128,5 +129,38 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
         var secondPage = await _repository.ListByBoardAsync(boardId, afterId: firstPage[^1].Id.Value, limit: 2, CancellationToken.None);
         Assert.Single(secondPage);
         Assert.DoesNotContain(secondPage, reminder => firstPage.Select(item => item.Id).Contains(reminder.Id));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsAnEditAndIncrementsVersion()
+    {
+        var reminder = NewReminder();
+        await _repository.AddAsync(reminder, CancellationToken.None);
+        var newSchedule = new ReminderSchedule(Recurrence.Monthly, reminder.Schedule.StartDate, reminder.Schedule.ReferenceTimezone);
+        reminder.Update(new ReminderTitle("Vet checkup"), newSchedule, NotifyPreset.OneHourBefore, Now.AddDays(1));
+
+        await _repository.UpdateAsync(reminder, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(reminder.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(1, reloaded.Version);
+        Assert.Equal("Vet checkup", reloaded.Title.Value);
+        Assert.Equal(Recurrence.Monthly, reloaded.Schedule.Recurrence);
+        Assert.Equal(NotifyPreset.OneHourBefore, reloaded.NotifyPreset);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ThrowsConcurrencyConflictExceptionWhenTheVersionIsStale()
+    {
+        var reminder = NewReminder();
+        await _repository.AddAsync(reminder, CancellationToken.None);
+        var staleCopy = await _repository.GetByIdAsync(reminder.Id, CancellationToken.None);
+        Assert.NotNull(staleCopy);
+
+        reminder.Update(new ReminderTitle("Vet checkup"), reminder.Schedule, reminder.NotifyPreset, Now.AddDays(1));
+        await _repository.UpdateAsync(reminder, CancellationToken.None);
+
+        staleCopy.Update(new ReminderTitle("Something else"), staleCopy.Schedule, staleCopy.NotifyPreset, Now.AddDays(2));
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(() => _repository.UpdateAsync(staleCopy, CancellationToken.None));
     }
 }

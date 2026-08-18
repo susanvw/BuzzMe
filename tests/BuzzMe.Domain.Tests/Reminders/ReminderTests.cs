@@ -103,4 +103,93 @@ public sealed class ReminderTests
     {
         Assert.False(RecurrenceCodes.TryParse("fortnightly", out _));
     }
+
+    [Fact]
+    public void Update_TitleChange_SetsTitleAndRaisesReminderUpdated()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+        var updatedAt = Now.AddDays(1);
+
+        reminder.Update(new ReminderTitle("Vet checkup"), reminder.Schedule, reminder.NotifyPreset, updatedAt);
+
+        Assert.Equal("Vet checkup", reminder.Title.Value);
+        Assert.Equal(updatedAt, reminder.UpdatedAt);
+        var raised = Assert.Single(reminder.DomainEvents.OfType<ReminderUpdated>());
+        Assert.Equal(reminder.Id, raised.ReminderId);
+        Assert.Equal("Vet checkup", raised.Title.Value);
+        Assert.Empty(reminder.DomainEvents.OfType<RecurrenceRuleUpdated>());
+        Assert.Empty(reminder.DomainEvents.OfType<NotifyPresetUpdated>());
+    }
+
+    [Fact]
+    public void Update_StartDateChange_RaisesReminderUpdated()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+        var newSchedule = new ReminderSchedule(Recurrence.Yearly, new DateTime(2027, 1, 1, 9, 0, 0), "UTC");
+
+        reminder.Update(reminder.Title, newSchedule, reminder.NotifyPreset, Now.AddDays(1));
+
+        Assert.Equal(newSchedule.StartDate, reminder.Schedule.StartDate);
+        var raised = Assert.Single(reminder.DomainEvents.OfType<ReminderUpdated>());
+        Assert.Equal(newSchedule.StartDate, raised.StartDate);
+    }
+
+    [Fact]
+    public void Update_RecurrenceChange_RaisesRecurrenceRuleUpdatedOnly()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+        var newSchedule = new ReminderSchedule(Recurrence.Monthly, reminder.Schedule.StartDate, reminder.Schedule.ReferenceTimezone);
+
+        reminder.Update(reminder.Title, newSchedule, reminder.NotifyPreset, Now.AddDays(1));
+
+        Assert.Equal(Recurrence.Monthly, reminder.Schedule.Recurrence);
+        var raised = Assert.Single(reminder.DomainEvents.OfType<RecurrenceRuleUpdated>());
+        Assert.Equal(Recurrence.Monthly, raised.Recurrence);
+        Assert.Empty(reminder.DomainEvents.OfType<ReminderUpdated>());
+    }
+
+    [Fact]
+    public void Update_NotifyPresetChange_RaisesNotifyPresetUpdatedOnly()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+
+        reminder.Update(reminder.Title, reminder.Schedule, NotifyPreset.OneHourBefore, Now.AddDays(1));
+
+        Assert.Equal(NotifyPreset.OneHourBefore, reminder.NotifyPreset);
+        var raised = Assert.Single(reminder.DomainEvents.OfType<NotifyPresetUpdated>());
+        Assert.Equal(NotifyPreset.OneHourBefore, raised.NotifyPreset);
+        Assert.Empty(reminder.DomainEvents.OfType<ReminderUpdated>());
+    }
+
+    [Fact]
+    public void Update_MultipleFieldsChanged_RaisesEachMatchingEvent()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+        var newSchedule = new ReminderSchedule(Recurrence.Weekly, reminder.Schedule.StartDate, reminder.Schedule.ReferenceTimezone);
+
+        reminder.Update(new ReminderTitle("Vet checkup"), newSchedule, NotifyPreset.OneDayBefore, Now.AddDays(1));
+
+        Assert.Single(reminder.DomainEvents.OfType<ReminderUpdated>());
+        Assert.Single(reminder.DomainEvents.OfType<RecurrenceRuleUpdated>());
+        Assert.Single(reminder.DomainEvents.OfType<NotifyPresetUpdated>());
+    }
+
+    [Fact]
+    public void Update_WithIdenticalValues_IsANoOp()
+    {
+        var reminder = Reminder.Create(
+            new ReminderId(Guid.CreateVersion7()), SomeBoardId, new ReminderTitle("Vet visit"), YearlySchedule(), NotifyPreset.AtTime, Now);
+
+        reminder.Update(reminder.Title, reminder.Schedule, reminder.NotifyPreset, Now.AddDays(1));
+
+        Assert.Equal(Now, reminder.UpdatedAt);
+        Assert.Empty(reminder.DomainEvents.OfType<ReminderUpdated>());
+        Assert.Empty(reminder.DomainEvents.OfType<RecurrenceRuleUpdated>());
+        Assert.Empty(reminder.DomainEvents.OfType<NotifyPresetUpdated>());
+    }
 }

@@ -90,6 +90,56 @@ public sealed class ReminderApplicationService(
     }
 
     /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.7 — Authorization: Board Member (any Active Member,
+    /// matching Create's default). `title`/`recurrenceCode`/`startDate`/`notifyPresetCode`
+    /// are each nullable — a null means "leave this field as it is," resolved against the
+    /// Reminder's current values here before calling into the aggregate, which only ever
+    /// sees fully-resolved target values (same split as every other business-rule-vs-
+    /// invariant use case in this codebase). Uses <see cref="IBoardRepository.GetByIdIncludingDeletedAsync"/>
+    /// and an explicit <c>IsDeleted</c> check — not the deleted-excluding GetByIdAsync every
+    /// other Reminder method here uses — because App Layer §0's gap-closing note is explicit
+    /// that a deleted Board's stale Membership rows may still read as Active during the
+    /// soft-delete grace window, so "Board not found" (404) and "Board deleted" (409) must
+    /// stay distinguishable rather than both collapsing into 404.
+    /// </summary>
+    public async Task<Result<ReminderResult>> UpdateReminderAsync(
+        Guid requestingUserId,
+        Guid reminderId,
+        string? title,
+        string? recurrenceCode,
+        DateTime? startDate,
+        string? notifyPresetCode,
+        CancellationToken cancellationToken)
+    {
+        var reminder = await reminderRepository.GetByIdAsync(new ReminderId(reminderId), cancellationToken);
+        if (reminder is null)
+            return Result.Failure<ReminderResult>(Error.NotFound("Reminder not found."));
+
+        var board = await boardRepository.GetByIdIncludingDeletedAsync(reminder.BoardId, cancellationToken);
+        if (board is null || !board.HasMember(requestingUserId))
+            return Result.Failure<ReminderResult>(Error.NotFound("Reminder not found."));
+
+        if (board.IsDeleted)
+            return Result.Failure<ReminderResult>(Error.Conflict("This Reminder's Board has been deleted."));
+
+        var recurrence = reminder.Schedule.Recurrence;
+        if (recurrenceCode is not null && !RecurrenceCodes.TryParse(recurrenceCode, out recurrence))
+            return Result.Failure<ReminderResult>(Error.Validation("Recurrence must be one of the supported values."));
+
+        var notifyPreset = reminder.NotifyPreset;
+        if (notifyPresetCode is not null && !NotifyPresetCodes.TryParse(notifyPresetCode, out notifyPreset))
+            return Result.Failure<ReminderResult>(Error.Validation("Notify preset must be one of the supported values."));
+
+        var newTitle = title is not null ? new ReminderTitle(title) : reminder.Title;
+        var newSchedule = new ReminderSchedule(recurrence, startDate ?? reminder.Schedule.StartDate, reminder.Schedule.ReferenceTimezone);
+
+        reminder.Update(newTitle, newSchedule, notifyPreset, clock.UtcNow);
+        await reminderRepository.UpdateAsync(reminder, cancellationToken);
+
+        return Result.Success(ReminderResult.FromDomain(reminder));
+    }
+
+    /// <summary>
     /// Authorization: Board Member (any Member — matches Edit's shared-responsibility
     /// default, Implementation Spec §1). Same flat-path, load-Reminder-first reasoning as
     /// GetReminderAsync. Uses the "including deleted" lookup specifically so that deleting

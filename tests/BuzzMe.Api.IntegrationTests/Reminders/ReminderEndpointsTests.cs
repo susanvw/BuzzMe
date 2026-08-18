@@ -155,4 +155,104 @@ public sealed class ReminderEndpointsTests : IClassFixture<BuzzMeApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task UpdateReminder_TitleOnly_UpdatesJustTheTitle()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(client, "Family");
+        var created = await CreateReminderAsync(client, board.Id);
+
+        var response = await client.PatchAsJsonAsync(
+            $"/v1/reminders/{created.Id}", new UpdateReminderRequest("Emma's actual birthday", null, null, null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<ReminderResponse>>();
+        Assert.Equal("Emma's actual birthday", body?.Data?.Title);
+        Assert.Equal(created.Recurrence, body?.Data?.Recurrence);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_WithNoFieldsProvided_IsANoOp()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(client, "Family");
+        var created = await CreateReminderAsync(client, board.Id);
+
+        var response = await client.PatchAsJsonAsync($"/v1/reminders/{created.Id}", new UpdateReminderRequest(null, null, null, null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<ReminderResponse>>();
+        Assert.Equal(created.Title, body?.Data?.Title);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_WithABoardIdInTheBody_ReturnsValidationError()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(client, "Family");
+        var created = await CreateReminderAsync(client, board.Id);
+
+        var response = await client.PatchAsJsonAsync(
+            $"/v1/reminders/{created.Id}", new { boardId = Guid.CreateVersion7(), title = "New title" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<ReminderResponse>>();
+        Assert.Equal(ErrorCode.ValidationError, body?.Error?.Code);
+        Assert.Null(body?.Data);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_WithAnInvalidRecurrence_ReturnsValidationError()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(client, "Family");
+        var created = await CreateReminderAsync(client, board.Id);
+
+        var response = await client.PatchAsJsonAsync(
+            $"/v1/reminders/{created.Id}", new UpdateReminderRequest(null, "fortnightly", null, null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<ReminderResponse>>();
+        Assert.Equal(ErrorCode.ValidationError, body?.Error?.Code);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_ReturnsNotFoundForSomeoneWhoIsNotAMemberOfTheOwningBoard()
+    {
+        var ownerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(ownerClient, "Family");
+        var created = await CreateReminderAsync(ownerClient, board.Id);
+        var strangerClient = CreateAuthenticatedClient(Guid.CreateVersion7());
+
+        var response = await strangerClient.PatchAsJsonAsync(
+            $"/v1/reminders/{created.Id}", new UpdateReminderRequest("New title", null, null, null));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_ReturnsConflictWhenTheOwningBoardIsDeleted()
+    {
+        var client = CreateAuthenticatedClient(Guid.CreateVersion7());
+        var board = await CreateBoardAsync(client, "Family");
+        var created = await CreateReminderAsync(client, board.Id);
+        await client.DeleteAsync($"/v1/boards/{board.Id}");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/v1/reminders/{created.Id}", new UpdateReminderRequest("New title", null, null, null));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateReminder_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PatchAsJsonAsync(
+            $"/v1/reminders/{Guid.CreateVersion7()}", new UpdateReminderRequest("New title", null, null, null));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }

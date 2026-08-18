@@ -39,4 +39,9 @@ public sealed class InMemoryReminderRepository : IReminderRepository
 
         return Task.CompletedTask;
     }
+
+    public Task UpdateAsync(Reminder reminder, CancellationToken cancellationToken) =>
+        // No-op — same by-reference reasoning as InMemoryBoardRepository/InMemoryBuzzRepository:
+        // Reminder.Update already mutated the shared instance in place before this is called.
+        Task.CompletedTask;
 }

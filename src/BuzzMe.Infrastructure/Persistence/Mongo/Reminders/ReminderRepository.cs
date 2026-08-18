@@ -1,5 +1,6 @@
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders.Mappers;
 using MongoDB.Driver;
 
@@ -58,5 +59,33 @@ public sealed class ReminderRepository(MongoContext context) : IReminderReposito
         var update = Builders<ReminderDocument>.Update.Set(d => d.DeletedAt, deletedAt);
 
         await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+    }
+
+    public async Task UpdateAsync(Reminder reminder, CancellationToken cancellationToken)
+    {
+        var filter = Builders<ReminderDocument>.Filter.Eq(d => d.Id, reminder.Id.Value)
+            & Builders<ReminderDocument>.Filter.Eq(d => d.Version, reminder.Version);
+
+        var replacement = new ReminderDocument
+        {
+            Id = reminder.Id.Value,
+            BoardId = reminder.BoardId.Value,
+            Title = reminder.Title.Value,
+            Recurrence = reminder.Schedule.Recurrence.ToCode(),
+            StartDate = reminder.Schedule.StartDate,
+            ReferenceTimezone = reminder.Schedule.ReferenceTimezone,
+            NotifyPreset = reminder.NotifyPreset.ToCode(),
+            CreatedAt = reminder.CreatedAt,
+            UpdatedAt = reminder.UpdatedAt,
+            DeletedAt = reminder.DeletedAt,
+            Version = reminder.Version + 1,
+        };
+
+        var result = await Collection.ReplaceOneAsync(filter, replacement, cancellationToken: cancellationToken);
+        if (result.MatchedCount == 0)
+        {
+            throw new ConcurrencyConflictException(
+                $"Reminder {reminder.Id} was modified by someone else since it was loaded (expected version {reminder.Version}).");
+        }
     }
 }

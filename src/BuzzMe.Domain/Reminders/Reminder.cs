@@ -54,6 +54,39 @@ public sealed class Reminder : AggregateRoot<ReminderId>
         return reminder;
     }
 
+    /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3.7 — the Application layer resolves the caller's partial
+    /// request into fully-resolved target values (falling back to the current value for any
+    /// field the caller omitted) before calling this; this method only decides which of the
+    /// three field groups actually changed and raises exactly the matching event(s) —
+    /// title/date share <see cref="Events.ReminderUpdated"/>, recurrence gets its own
+    /// <see cref="Events.RecurrenceRuleUpdated"/>, notify preset its own
+    /// <see cref="Events.NotifyPresetUpdated"/>, since each drives a different downstream
+    /// policy (§7). Re-applying identical values raises nothing and leaves
+    /// <see cref="UpdatedAt"/> untouched — API_CONTRACT.md §5's own stated idempotency rule.
+    /// </summary>
+    public void Update(ReminderTitle title, ReminderSchedule schedule, NotifyPreset notifyPreset, DateTimeOffset updatedAt)
+    {
+        var titleOrDateChanged = Title != title || Schedule.StartDate != schedule.StartDate;
+        var recurrenceChanged = Schedule.Recurrence != schedule.Recurrence;
+        var notifyPresetChanged = NotifyPreset != notifyPreset;
+
+        if (!titleOrDateChanged && !recurrenceChanged && !notifyPresetChanged)
+            return;
+
+        Title = title;
+        Schedule = schedule;
+        NotifyPreset = notifyPreset;
+        UpdatedAt = updatedAt;
+
+        if (titleOrDateChanged)
+            Raise(new ReminderUpdated(Guid.CreateVersion7(), updatedAt, Id, title, schedule.StartDate));
+        if (recurrenceChanged)
+            Raise(new RecurrenceRuleUpdated(Guid.CreateVersion7(), updatedAt, Id, schedule.Recurrence));
+        if (notifyPresetChanged)
+            Raise(new NotifyPresetUpdated(Guid.CreateVersion7(), updatedAt, Id, notifyPreset));
+    }
+
     /// <summary>Sets DeletedAt — History and Occurrences are untouched by this call, by construction (they never reference this field).</summary>
     public void Delete(DateTimeOffset deletedAt)
     {

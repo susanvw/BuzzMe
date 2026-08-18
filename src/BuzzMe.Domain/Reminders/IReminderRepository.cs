@@ -23,4 +23,14 @@ public interface IReminderRepository
 
     /// <summary>A targeted update (sets DeletedAt), not a document removal — IMPLEMENTATION_SPEC.md §1's Delete was always a soft delete; see REMINDER_LIFECYCLE_REVIEW.md.</summary>
     Task MarkDeletedAsync(ReminderId id, DateTimeOffset deletedAt, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sprint 16 — a full aggregate replace, version-checked exactly like
+    /// BoardRepository/OccurrenceRepository's own UpdateAsync: UpdateReminder can change
+    /// Title/Schedule/NotifyPreset together in one call. Throws
+    /// <see cref="SeedWork.ConcurrencyConflictException"/> on a stale write — the first
+    /// caller this codebase has that needs a full Reminder replace at all (every prior write
+    /// path was either an insert or the single-field MarkDeletedAsync above).
+    /// </summary>
+    Task UpdateAsync(Reminder reminder, CancellationToken cancellationToken);
 }
