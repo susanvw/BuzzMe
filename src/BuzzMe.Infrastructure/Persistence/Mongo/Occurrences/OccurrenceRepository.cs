@@ -1,5 +1,6 @@
 using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences.Mappers;
 using MongoDB.Driver;
 
@@ -59,5 +60,30 @@ public sealed class OccurrenceRepository(MongoContext context) : IOccurrenceRepo
             .FirstOrDefaultAsync(cancellationToken);
 
         return document is null ? null : OccurrenceMapper.ToDomain(document);
+    }
+
+    public async Task UpdateAsync(Occurrence occurrence, CancellationToken cancellationToken)
+    {
+        var filter = Builders<OccurrenceDocument>.Filter.Eq(d => d.Id, occurrence.Id.Value)
+            & Builders<OccurrenceDocument>.Filter.Eq(d => d.Version, occurrence.Version);
+
+        var replacement = new OccurrenceDocument
+        {
+            Id = occurrence.Id.Value,
+            ReminderId = occurrence.ReminderId.Value,
+            DueAt = occurrence.DueAt,
+            Status = occurrence.Status.ToCode(),
+            GeneratedAt = occurrence.GeneratedAt,
+            ResolvedByUserId = occurrence.ResolvedByUserId,
+            ResolvedAt = occurrence.ResolvedAt,
+            Version = occurrence.Version + 1,
+        };
+
+        var result = await Collection.ReplaceOneAsync(filter, replacement, cancellationToken: cancellationToken);
+        if (result.MatchedCount == 0)
+        {
+            throw new ConcurrencyConflictException(
+                $"Occurrence {occurrence.Id} was modified by someone else since it was loaded (expected version {occurrence.Version}).");
+        }
     }
 }

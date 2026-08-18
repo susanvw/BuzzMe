@@ -38,7 +38,8 @@ public sealed class CollaborationAcceptanceTests
         var idGenerator = new FakeIdGenerator();
         _boardService = new BoardApplicationService(_boardRepository, _userRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(_reminderRepository, _boardRepository, idGenerator, _clock);
-        _occurrenceService = new OccurrenceApplicationService(_occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
+        _occurrenceService = new OccurrenceApplicationService(
+            _occurrenceRepository, _reminderRepository, _boardRepository, _userRepository, idGenerator, _clock);
         _buzzService = new BuzzApplicationService(_buzzRepository, _occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
         _invitationService = new InvitationApplicationService(
             _invitationRepository, _boardRepository, new FakeInvitationTokenGenerator(), idGenerator, _clock);

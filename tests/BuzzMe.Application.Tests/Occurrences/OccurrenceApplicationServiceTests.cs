@@ -2,6 +2,7 @@ using BuzzMe.Application.Occurrences;
 using BuzzMe.Application.Reminders;
 using BuzzMe.Application.Tests.TestDoubles;
 using BuzzMe.Domain.Boards;
+using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
 
 namespace BuzzMe.Application.Tests.Occurrences;
@@ -11,6 +12,7 @@ public sealed class OccurrenceApplicationServiceTests
     private readonly InMemoryBoardRepository _boardRepository = new();
     private readonly InMemoryReminderRepository _reminderRepository = new();
     private readonly InMemoryOccurrenceRepository _occurrenceRepository = new();
+    private readonly InMemoryUserRepository _userRepository = new();
     private readonly FakeClock _clock = new(new DateTimeOffset(2026, 8, 1, 9, 0, 0, TimeSpan.Zero));
     private readonly OccurrenceApplicationService _sut;
     private readonly ReminderApplicationService _reminderService;
@@ -20,11 +22,19 @@ public sealed class OccurrenceApplicationServiceTests
     public OccurrenceApplicationServiceTests()
     {
         var idGenerator = new FakeIdGenerator();
-        _sut = new OccurrenceApplicationService(_occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
+        _sut = new OccurrenceApplicationService(
+            _occurrenceRepository, _reminderRepository, _boardRepository, _userRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(_reminderRepository, _boardRepository, idGenerator, _clock);
 
         _board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), _memberUserId, _clock.UtcNow);
         _boardRepository.AddAsync(_board, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private async Task<(Guid ReminderId, Guid OccurrenceId)> CreateResolvableOccurrenceAsync(DateTimeOffset dueAt)
+    {
+        var reminderId = await CreateReminderAsync("once", dueAt.DateTime);
+        var generated = await _sut.GenerateOccurrencesAsync(_memberUserId, reminderId, CancellationToken.None);
+        return (reminderId, generated.Value[0].Id);
     }
 
     private async Task<Guid> CreateReminderAsync(string recurrence, DateTime startDate)
@@ -162,5 +172,196 @@ public sealed class OccurrenceApplicationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(occurrenceId, result.Value.Id);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_MarksCompletedAndStampsTheResolver()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+
+        var result = await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value.VersionConflict);
+        Assert.Equal("completed", result.Value.Occurrence.Status);
+        Assert.Equal(_memberUserId, result.Value.Occurrence.ResolvedByUserId);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_CalledAgainWithTheMatchingVersion_IsIdempotent()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+        await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        var second = await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(second.IsSuccess);
+        Assert.False(second.Value.VersionConflict);
+        Assert.Equal("completed", second.Value.Occurrence.Status);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_AfterADismiss_ReturnsTheDismissedStateWithoutOverridingIt()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+        await _sut.DismissOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        var result = await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value.VersionConflict);
+        Assert.Equal("dismissed", result.Value.Occurrence.Status);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_WithAStaleExpectedVersion_ReturnsAVersionConflict()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+
+        var result = await _sut.CompleteOccurrenceAsync(
+            _memberUserId, reminderId, occurrenceId, expectedVersion: 999, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.VersionConflict);
+        Assert.Equal("scheduled", result.Value.Occurrence.Status);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_ReturnsGoneWhenTheParentReminderIsDeleted()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+
+        var result = await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("GONE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_ReturnsNotFoundForSomeoneWhoIsNotAMember()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+        var strangerUserId = Guid.CreateVersion7();
+
+        var result = await _sut.CompleteOccurrenceAsync(strangerUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_ReturnsNotFoundForAnOccurrenceThatDoesNotExist()
+    {
+        var result = await _sut.CompleteOccurrenceAsync(
+            _memberUserId, Guid.CreateVersion7(), Guid.CreateVersion7(), expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CompleteOccurrenceAsync_ReturnsNotFoundWhenTheReminderIdInThePathDoesNotMatch()
+    {
+        var (_, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+
+        var result = await _sut.CompleteOccurrenceAsync(
+            _memberUserId, Guid.CreateVersion7(), occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task DismissOccurrenceAsync_MarksDismissedAndStampsTheResolver()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+
+        var result = await _sut.DismissOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("dismissed", result.Value.Occurrence.Status);
+        Assert.Equal(_memberUserId, result.Value.Occurrence.ResolvedByUserId);
+    }
+
+    [Fact]
+    public async Task DismissOccurrenceAsync_CalledAgainWithTheMatchingVersion_IsIdempotent()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+        await _sut.DismissOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        var second = await _sut.DismissOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(second.IsSuccess);
+        Assert.False(second.Value.VersionConflict);
+    }
+
+    [Fact]
+    public async Task ReopenOccurrenceAsync_RestoresAResolvedOccurrenceWithinTheGraceWindow()
+    {
+        var dueAt = _clock.UtcNow.AddHours(-1);
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(dueAt);
+        await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        var result = await _sut.ReopenOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value.VersionConflict);
+        Assert.Equal("due", result.Value.Occurrence.Status);
+        Assert.Null(result.Value.Occurrence.ResolvedByUserId);
+    }
+
+    [Fact]
+    public async Task ReopenOccurrenceAsync_ReturnsConflictWhenNotCurrentlyResolved()
+    {
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
+
+        var result = await _sut.ReopenOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("CONFLICT", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ReopenOccurrenceAsync_ReturnsForbiddenPastTheGraceWindow()
+    {
+        var dueAt = _clock.UtcNow.AddHours(-1);
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(dueAt);
+        await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+        _clock.Advance(TimeSpan.FromHours(25));
+
+        var result = await _sut.ReopenOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ReopenOccurrenceAsync_ReturnsGoneWhenTheParentReminderIsDeleted()
+    {
+        var dueAt = _clock.UtcNow.AddHours(-1);
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(dueAt);
+        await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+
+        var result = await _sut.ReopenOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("GONE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ReopenOccurrenceAsync_WithAStaleExpectedVersion_ReturnsAVersionConflict()
+    {
+        var dueAt = _clock.UtcNow.AddHours(-1);
+        var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(dueAt);
+        await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
+
+        var result = await _sut.ReopenOccurrenceAsync(
+            _memberUserId, reminderId, occurrenceId, expectedVersion: 999, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.VersionConflict);
+        Assert.Equal("completed", result.Value.Occurrence.Status);
     }
 }

@@ -1,5 +1,6 @@
 using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 using MongoDB.Driver;
@@ -111,5 +112,42 @@ public sealed class OccurrenceRepositoryTests(MongoIntegrationTestFixture fixtur
         var result = await _repository.GetLatestByReminderAsync(new ReminderId(Guid.CreateVersion7()), CancellationToken.None);
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsAResolutionAndIncrementsVersion()
+    {
+        var occurrence = NewOccurrence(new ReminderId(Guid.CreateVersion7()), Now.AddDays(10));
+        await _repository.AddAsync(occurrence, CancellationToken.None);
+        var resolvingUserId = Guid.CreateVersion7();
+        occurrence.Complete(resolvingUserId, Now);
+
+        await _repository.UpdateAsync(occurrence, CancellationToken.None);
+        var reloaded = await _repository.GetByIdAsync(occurrence.Id, CancellationToken.None);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(1, reloaded.Version);
+        Assert.Equal(OccurrenceStatus.Completed, reloaded.Status);
+        Assert.Equal(resolvingUserId, reloaded.ResolvedByUserId);
+        Assert.Equal(Now, reloaded.ResolvedAt);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ThrowsConcurrencyConflictExceptionWhenTheVersionIsStale()
+    {
+        // Sprint 15's own exercise of BuzzRepositoryTests' exact Sprint 6 pattern: two
+        // in-memory copies of the same Occurrence, one of which persists its resolution
+        // first, making the second's Version stale — this is exactly the race
+        // APPLICATION_LAYER_SPEC.md §3.8 documents as "already done by X."
+        var occurrence = NewOccurrence(new ReminderId(Guid.CreateVersion7()), Now.AddDays(11));
+        await _repository.AddAsync(occurrence, CancellationToken.None);
+        var staleCopy = await _repository.GetByIdAsync(occurrence.Id, CancellationToken.None);
+        Assert.NotNull(staleCopy);
+
+        occurrence.Complete(Guid.CreateVersion7(), Now);
+        await _repository.UpdateAsync(occurrence, CancellationToken.None);
+
+        staleCopy.Dismiss(Guid.CreateVersion7(), Now);
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(() => _repository.UpdateAsync(staleCopy, CancellationToken.None));
     }
 }

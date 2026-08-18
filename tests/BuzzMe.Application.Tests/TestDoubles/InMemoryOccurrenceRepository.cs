@@ -36,4 +36,11 @@ public sealed class InMemoryOccurrenceRepository : IOccurrenceRepository
             .Where(occurrence => occurrence.ReminderId == reminderId)
             .OrderByDescending(occurrence => occurrence.DueAt)
             .FirstOrDefault());
+
+    public Task UpdateAsync(Occurrence occurrence, CancellationToken cancellationToken) =>
+        // No-op — same by-reference reasoning as InMemoryBuzzRepository/InMemoryBoardRepository:
+        // Complete/Dismiss/Undo already mutated the shared Occurrence instance in place before
+        // this is called. Real version-checked conflict behavior is Infrastructure integration
+        // test territory (OccurrenceRepositoryTests), matching BuzzRepositoryTests' own precedent.
+        Task.CompletedTask;
 }

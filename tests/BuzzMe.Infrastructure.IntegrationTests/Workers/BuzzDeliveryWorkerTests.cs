@@ -59,7 +59,8 @@ public sealed class BuzzDeliveryWorkerTests(MongoIntegrationTestFixture fixture)
         var idGenerator = new TimeSortableIdGenerator();
         _boardService = new BoardApplicationService(boardRepository, userRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(reminderRepository, boardRepository, idGenerator, _clock);
-        _occurrenceService = new OccurrenceApplicationService(occurrenceRepository, reminderRepository, boardRepository, idGenerator, _clock);
+        _occurrenceService = new OccurrenceApplicationService(
+            occurrenceRepository, reminderRepository, boardRepository, userRepository, idGenerator, _clock);
         _buzzService = new BuzzApplicationService(_buzzRepository, occurrenceRepository, reminderRepository, boardRepository, idGenerator, _clock);
     }
 

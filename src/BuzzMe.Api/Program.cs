@@ -9,6 +9,7 @@ using BuzzMe.Application.Abstractions;
 using BuzzMe.Application.Auth;
 using BuzzMe.Application.Boards;
 using BuzzMe.Application.Invitations;
+using BuzzMe.Application.Occurrences;
 using BuzzMe.Application.Reminders;
 using BuzzMe.Application.Users;
 using BuzzMe.Infrastructure.DependencyInjection;
@@ -69,6 +70,7 @@ builder.Services.AddBuzzMeInfrastructure(builder.Configuration);
 // here as each is implemented.
 builder.Services.AddScoped<BoardApplicationService>();
 builder.Services.AddScoped<ReminderApplicationService>();
+builder.Services.AddScoped<OccurrenceApplicationService>();
 builder.Services.AddScoped<InvitationApplicationService>();
 builder.Services.AddScoped<UserApplicationService>();
 builder.Services.AddScoped<AuthApplicationService>();
@@ -101,6 +103,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 // per resource area, matching API_CONTRACT.md §5 exactly.
 app.MapBoardEndpoints();
 app.MapReminderEndpoints();
+app.MapOccurrenceEndpoints();
 app.MapInvitationEndpoints();
 app.MapUserEndpoints();
 app.MapAuthEndpoints();

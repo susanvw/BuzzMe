@@ -14,6 +14,7 @@ public sealed class BuzzApplicationServiceTests
     private readonly InMemoryReminderRepository _reminderRepository = new();
     private readonly InMemoryOccurrenceRepository _occurrenceRepository = new();
     private readonly InMemoryBuzzRepository _buzzRepository = new();
+    private readonly InMemoryUserRepository _userRepository = new();
     private readonly FakeClock _clock = new(new DateTimeOffset(2026, 8, 3, 9, 0, 0, TimeSpan.Zero));
     private readonly BuzzApplicationService _sut;
     private readonly ReminderApplicationService _reminderService;
@@ -26,7 +27,8 @@ public sealed class BuzzApplicationServiceTests
         var idGenerator = new FakeIdGenerator();
         _sut = new BuzzApplicationService(_buzzRepository, _occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
         _reminderService = new ReminderApplicationService(_reminderRepository, _boardRepository, idGenerator, _clock);
-        _occurrenceService = new OccurrenceApplicationService(_occurrenceRepository, _reminderRepository, _boardRepository, idGenerator, _clock);
+        _occurrenceService = new OccurrenceApplicationService(
+            _occurrenceRepository, _reminderRepository, _boardRepository, _userRepository, idGenerator, _clock);
 
         _board = Board.Create(new BoardId(Guid.CreateVersion7()), new BoardName("Family"), _memberUserId, _clock.UtcNow);
         _boardRepository.AddAsync(_board, CancellationToken.None).GetAwaiter().GetResult();

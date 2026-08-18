@@ -17,4 +17,14 @@ public interface IOccurrenceRepository
 
     /// <summary>The Occurrence with the latest DueAt for this Reminder, if any — used to decide whether generation has already caught up to "now."</summary>
     Task<Occurrence?> GetLatestByReminderAsync(ReminderId reminderId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A full aggregate replace, version-checked exactly like BuzzRepository.UpdateAsync —
+    /// Complete/Dismiss/Undo each change Status plus ResolvedByUserId/ResolvedAt together.
+    /// Throws <see cref="SeedWork.ConcurrencyConflictException"/> on a version mismatch; the
+    /// Application layer is the one place this codebase treats that exception as an
+    /// expected, documented outcome ("already done by X") rather than a genuine fault —
+    /// see OccurrenceApplicationService.
+    /// </summary>
+    Task UpdateAsync(Occurrence occurrence, CancellationToken cancellationToken);
 }
