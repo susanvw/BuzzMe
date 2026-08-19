@@ -12,6 +12,7 @@ using BuzzMe.Infrastructure.Persistence.Mongo.Buzzes;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
 using BuzzMe.Infrastructure.Persistence.Mongo.Users;
+using BuzzMe.Infrastructure.Persistence.Outbox;
 using BuzzMe.Workers.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,10 +46,11 @@ public sealed class BuzzDeliveryWorkerTests(MongoIntegrationTestFixture fixture)
 
     public async Task InitializeAsync()
     {
+        var outboxWriter = new MongoOutboxWriter(fixture.Context, _clock);
         var boardRepository = new BoardRepository(fixture.Context);
         var userRepository = new UserRepository(fixture.Context);
-        var reminderRepository = new ReminderRepository(fixture.Context);
-        var occurrenceRepository = new OccurrenceRepository(fixture.Context);
+        var reminderRepository = new ReminderRepository(fixture.Context, outboxWriter);
+        var occurrenceRepository = new OccurrenceRepository(fixture.Context, outboxWriter);
         _buzzRepository = new BuzzRepository(fixture.Context);
 
         await new CreateBoardIndexes(fixture.Context).ApplyAsync(CancellationToken.None);

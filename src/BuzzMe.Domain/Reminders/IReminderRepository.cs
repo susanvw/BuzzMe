@@ -21,8 +21,16 @@ public interface IReminderRepository
     /// <summary>Excludes soft-deleted Reminders — ordered by Id (time-sortable), same cursor pattern as IBoardRepository.ListByMemberAsync.</summary>
     Task<IReadOnlyList<Reminder>> ListByBoardAsync(BoardId boardId, Guid? afterId, int limit, CancellationToken cancellationToken);
 
-    /// <summary>A targeted update (sets DeletedAt), not a document removal — IMPLEMENTATION_SPEC.md §1's Delete was always a soft delete; see REMINDER_LIFECYCLE_REVIEW.md.</summary>
-    Task MarkDeletedAsync(ReminderId id, DateTimeOffset deletedAt, CancellationToken cancellationToken);
+    /// <summary>
+    /// A targeted update (sets DeletedAt), not a document removal — IMPLEMENTATION_SPEC.md
+    /// §1's Delete was always a soft delete; see REMINDER_LIFECYCLE_REVIEW.md. Takes the
+    /// aggregate itself (Sprint 17), not just its id/timestamp, so the implementation can
+    /// write <paramref name="reminder"/>'s raised events (ReminderDeleted) to the outbox in
+    /// the same MongoDB transaction as the DeletedAt update — DEVELOPMENT_GUIDE.md §7's
+    /// transactional-outbox requirement, needed here for the first time since Delete is
+    /// this codebase's only ReminderDeleted-raising write path.
+    /// </summary>
+    Task MarkDeletedAsync(Reminder reminder, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sprint 16 — a full aggregate replace, version-checked exactly like

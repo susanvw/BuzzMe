@@ -1,12 +1,14 @@
 namespace BuzzMe.Domain.Buzzes;
 
 /// <summary>
-/// IMPLEMENTATION_SPEC.md §1 — the full lifecycle (`Scheduled → Generated →
-/// (Delivered | Failed → Retried ... → Exhausted) → (Seen | Dismissed)`). Sprint 4 only
-/// ever constructs `Scheduled` — nothing exists yet to deliver, retry, or resolve a Buzz
-/// (that's dispatch/delivery scope, explicitly excluded here) — but the complete,
-/// already-specified enum is modeled now rather than a partial one, since the values
-/// themselves aren't speculative. Same reasoning as OccurrenceStatus (Sprint 3).
+/// IMPLEMENTATION_SPEC.md §1 — the lifecycle (`Scheduled → Generated →
+/// (Delivered | Failed → Retried ... → Exhausted) → (Seen | Dismissed)`), plus
+/// <see cref="Cancelled"/> (Sprint 17) — not part of that original enumeration, but
+/// required by the "cancel pending Buzzes" policy IMPLEMENTATION_SPEC.md §4/§7 names
+/// repeatedly and by name, for which no other status value fits. Retried/Exhausted/Seen/
+/// Dismissed remain unreachable in this codebase — nothing yet transitions a Buzz into any
+/// of them (retry scheduling and in-app notification read-tracking are both still
+/// unbuilt) — modeled anyway since the values themselves aren't speculative.
 /// </summary>
 public enum BuzzStatus
 {
@@ -18,6 +20,7 @@ public enum BuzzStatus
     Exhausted,
     Seen,
     Dismissed,
+    Cancelled,
 }
 
 /// <summary>Canonical short-codes, same reasoning as OccurrenceStatusCodes/RecurrenceCodes — needed for Mongo storage even with no API exposure yet.</summary>
@@ -33,6 +36,7 @@ public static class BuzzStatusCodes
         BuzzStatus.Exhausted => "exhausted",
         BuzzStatus.Seen => "seen",
         BuzzStatus.Dismissed => "dismissed",
+        BuzzStatus.Cancelled => "cancelled",
         _ => throw new ArgumentOutOfRangeException(nameof(status)),
     };
 
@@ -48,6 +52,7 @@ public static class BuzzStatusCodes
             case "exhausted": status = BuzzStatus.Exhausted; return true;
             case "seen": status = BuzzStatus.Seen; return true;
             case "dismissed": status = BuzzStatus.Dismissed; return true;
+            case "cancelled": status = BuzzStatus.Cancelled; return true;
             default: status = default; return false;
         }
     }

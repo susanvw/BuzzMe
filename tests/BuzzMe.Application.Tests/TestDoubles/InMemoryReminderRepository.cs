@@ -31,14 +31,12 @@ public sealed class InMemoryReminderRepository : IReminderRepository
         return Task.FromResult(page);
     }
 
-    public Task MarkDeletedAsync(ReminderId id, DateTimeOffset deletedAt, CancellationToken cancellationToken)
-    {
-        var reminder = _reminders.FirstOrDefault(reminder => reminder.Id == id);
-        if (reminder is not null && !reminder.IsDeleted)
-            reminder.Delete(deletedAt);
-
-        return Task.CompletedTask;
-    }
+    public Task MarkDeletedAsync(Reminder reminder, CancellationToken cancellationToken) =>
+        // No-op — same by-reference reasoning as UpdateAsync below: the caller already
+        // called reminder.Delete(...) on this exact shared instance before invoking this
+        // (Sprint 17 — MarkDeletedAsync now receives the aggregate itself, post-Delete,
+        // instead of separately re-deriving id/deletedAt).
+        Task.CompletedTask;
 
     public Task UpdateAsync(Reminder reminder, CancellationToken cancellationToken) =>
         // No-op — same by-reference reasoning as InMemoryBoardRepository/InMemoryBuzzRepository:

@@ -121,4 +121,36 @@ public sealed class BuzzApplicationService(
         buzz.MarkFailed(clock.UtcNow);
         await buzzRepository.UpdateAsync(buzz, cancellationToken);
     }
+
+    /// <summary>
+    /// APPLICATION_LAYER_SPEC.md §3's internal "CancelBuzzes" use case, reused by several
+    /// Policies (Sprint 17) — here, the one for Complete/DismissOccurrence
+    /// (IMPLEMENTATION_SPEC.md §4's "cancels any still-pending Buzzes for this specific
+    /// Occurrence"). No requestingUserId/authorization: this only ever runs as a Policy,
+    /// invoked by the outbox dispatcher off an already-committed event, never directly by
+    /// a User action — same posture as ClaimPendingBuzzesAsync.
+    /// </summary>
+    public async Task CancelBuzzesForOccurrenceAsync(Guid occurrenceId, DateTimeOffset cancelledAt, CancellationToken cancellationToken)
+    {
+        var buzzes = await buzzRepository.ListByOccurrenceAsync(new OccurrenceId(occurrenceId), cancellationToken);
+        foreach (var buzz in buzzes)
+        {
+            buzz.Cancel(cancelledAt);
+            await buzzRepository.UpdateAsync(buzz, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// IMPLEMENTATION_SPEC.md §4's "cancels every pending, not-yet-delivered Buzz for every
+    /// not-yet-resolved Occurrence of this Reminder" (DeleteReminder policy). A single
+    /// generously-sized page, not a real pagination loop — same accepted shortcut
+    /// DeleteAccountAsync's own Board enumeration already took (SPRINT_12_REPORT.md),
+    /// appropriate at this "family/team scale" (DOMAIN_MODEL.md), not a new gap.
+    /// </summary>
+    public async Task CancelBuzzesForReminderAsync(Guid reminderId, DateTimeOffset cancelledAt, CancellationToken cancellationToken)
+    {
+        var occurrences = await occurrenceRepository.ListByReminderAsync(new ReminderId(reminderId), afterId: null, limit: 1000, cancellationToken);
+        foreach (var occurrence in occurrences.Where(occurrence => !occurrence.IsResolved))
+            await CancelBuzzesForOccurrenceAsync(occurrence.Id.Value, cancelledAt, cancellationToken);
+    }
 }

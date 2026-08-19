@@ -4,6 +4,7 @@ using BuzzMe.Application.Reminders;
 using BuzzMe.Application.Tests.TestDoubles;
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Buzzes;
+using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
 
 namespace BuzzMe.Application.Tests.Buzzes;
@@ -104,7 +105,9 @@ public sealed class BuzzApplicationServiceTests
         // needed (ReminderRepository.GetByIdAsync already excludes it).
         var reminderId = await CreateReminderAsync();
         var occurrenceId = await CreateOccurrenceAsync(reminderId);
-        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+        var reminderToDelete = await _reminderRepository.GetByIdAsync(new ReminderId(reminderId), CancellationToken.None);
+        reminderToDelete!.Delete(_clock.UtcNow);
+        await _reminderRepository.MarkDeletedAsync(reminderToDelete, CancellationToken.None);
 
         var result = await _sut.GenerateBuzzesAsync(_memberUserId, occurrenceId, CancellationToken.None);
 
@@ -249,5 +252,65 @@ public sealed class BuzzApplicationServiceTests
         await _sut.MarkFailedAsync(claimed, CancellationToken.None);
 
         Assert.Equal(BuzzStatus.Failed, claimed.Status);
+    }
+
+    [Fact]
+    public async Task CancelBuzzesForOccurrenceAsync_CancelsAStillPendingBuzz()
+    {
+        var reminderId = await CreateReminderAsync();
+        var occurrenceId = await CreateOccurrenceAsync(reminderId);
+        var generated = await _sut.GenerateBuzzesAsync(_memberUserId, occurrenceId, CancellationToken.None);
+        var buzzId = generated.Value[0].Id;
+
+        await _sut.CancelBuzzesForOccurrenceAsync(occurrenceId, _clock.UtcNow, CancellationToken.None);
+
+        var buzz = await _sut.GetBuzzAsync(_memberUserId, buzzId, CancellationToken.None);
+        Assert.Equal("cancelled", buzz.Value.Status);
+    }
+
+    [Fact]
+    public async Task CancelBuzzesForOccurrenceAsync_DoesNotTouchAnAlreadyDeliveredBuzz()
+    {
+        var reminderId = await CreateReminderAsync();
+        var occurrenceId = await CreateOccurrenceAsync(reminderId);
+        var generated = await _sut.GenerateBuzzesAsync(_memberUserId, occurrenceId, CancellationToken.None);
+        var buzzId = generated.Value[0].Id;
+        _clock.Advance(TimeSpan.FromDays(2));
+        var claimed = Assert.Single(await _sut.ClaimPendingBuzzesAsync(batchSize: 20, CancellationToken.None));
+        await _sut.MarkDeliveredAsync(claimed, CancellationToken.None);
+
+        await _sut.CancelBuzzesForOccurrenceAsync(occurrenceId, _clock.UtcNow, CancellationToken.None);
+
+        var buzz = await _sut.GetBuzzAsync(_memberUserId, buzzId, CancellationToken.None);
+        Assert.Equal("delivered", buzz.Value.Status);
+    }
+
+    [Fact]
+    public async Task CancelBuzzesForReminderAsync_CancelsBuzzesOnlyForNotYetResolvedOccurrences()
+    {
+        var reminderId = await CreateReminderAsync();
+        var startDate = _clock.UtcNow.DateTime.AddDays(-2);
+        var dailyResult = await _reminderService.CreateReminderAsync(
+            _memberUserId, _board.Id.Value, "Daily standup", "daily", startDate, "atTime", CancellationToken.None);
+        var dailyReminderId = dailyResult.Value.Id;
+        var generatedOccurrences = await _occurrenceService.GenerateOccurrencesAsync(_memberUserId, dailyReminderId, CancellationToken.None);
+        Assert.True(generatedOccurrences.Value.Count >= 2);
+        var resolvedOccurrenceId = generatedOccurrences.Value[0].Id;
+        var pendingOccurrenceId = generatedOccurrences.Value[1].Id;
+
+        await _sut.GenerateBuzzesAsync(_memberUserId, resolvedOccurrenceId, CancellationToken.None);
+        var pendingGenerated = await _sut.GenerateBuzzesAsync(_memberUserId, pendingOccurrenceId, CancellationToken.None);
+        var pendingBuzzId = pendingGenerated.Value[0].Id;
+        var resolvedOccurrence = await _occurrenceRepository.GetByIdAsync(new OccurrenceId(resolvedOccurrenceId), CancellationToken.None);
+        resolvedOccurrence!.Complete(_memberUserId, _clock.UtcNow);
+        var resolvedBuzzes = await _buzzRepository.ListByOccurrenceAsync(new OccurrenceId(resolvedOccurrenceId), CancellationToken.None);
+        var resolvedBuzzId = resolvedBuzzes.Single().Id.Value;
+
+        await _sut.CancelBuzzesForReminderAsync(dailyReminderId, _clock.UtcNow, CancellationToken.None);
+
+        var resolvedOccurrenceBuzz = await _sut.GetBuzzAsync(_memberUserId, resolvedBuzzId, CancellationToken.None);
+        var pendingOccurrenceBuzz = await _sut.GetBuzzAsync(_memberUserId, pendingBuzzId, CancellationToken.None);
+        Assert.Equal("scheduled", resolvedOccurrenceBuzz.Value.Status);
+        Assert.Equal("cancelled", pendingOccurrenceBuzz.Value.Status);
     }
 }

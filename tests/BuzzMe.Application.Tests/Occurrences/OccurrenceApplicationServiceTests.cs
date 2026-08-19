@@ -166,7 +166,9 @@ public sealed class OccurrenceApplicationServiceTests
         var reminderId = await CreateReminderAsync("once", _clock.UtcNow.DateTime.AddDays(1));
         var generated = await _sut.GenerateOccurrencesAsync(_memberUserId, reminderId, CancellationToken.None);
         var occurrenceId = generated.Value[0].Id;
-        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+        var reminderToDelete = await _reminderRepository.GetByIdAsync(new ReminderId(reminderId), CancellationToken.None);
+        reminderToDelete!.Delete(_clock.UtcNow);
+        await _reminderRepository.MarkDeletedAsync(reminderToDelete, CancellationToken.None);
 
         var result = await _sut.GetOccurrenceAsync(_memberUserId, occurrenceId, CancellationToken.None);
 
@@ -230,7 +232,9 @@ public sealed class OccurrenceApplicationServiceTests
     public async Task CompleteOccurrenceAsync_ReturnsGoneWhenTheParentReminderIsDeleted()
     {
         var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(_clock.UtcNow.AddDays(1));
-        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+        var reminderToDelete = await _reminderRepository.GetByIdAsync(new ReminderId(reminderId), CancellationToken.None);
+        reminderToDelete!.Delete(_clock.UtcNow);
+        await _reminderRepository.MarkDeletedAsync(reminderToDelete, CancellationToken.None);
 
         var result = await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
 
@@ -342,7 +346,9 @@ public sealed class OccurrenceApplicationServiceTests
         var dueAt = _clock.UtcNow.AddHours(-1);
         var (reminderId, occurrenceId) = await CreateResolvableOccurrenceAsync(dueAt);
         await _sut.CompleteOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
-        await _reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), _clock.UtcNow, CancellationToken.None);
+        var reminderToDelete = await _reminderRepository.GetByIdAsync(new ReminderId(reminderId), CancellationToken.None);
+        reminderToDelete!.Delete(_clock.UtcNow);
+        await _reminderRepository.MarkDeletedAsync(reminderToDelete, CancellationToken.None);
 
         var result = await _sut.ReopenOccurrenceAsync(_memberUserId, reminderId, occurrenceId, expectedVersion: 0, CancellationToken.None);
 

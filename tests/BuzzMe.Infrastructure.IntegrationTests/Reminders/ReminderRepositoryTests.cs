@@ -1,8 +1,12 @@
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.Reminders.Events;
 using BuzzMe.Domain.SeedWork;
+using BuzzMe.Infrastructure.IntegrationTests.Workers.TestDoubles;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
+using BuzzMe.Infrastructure.Persistence.Outbox;
+using MongoDB.Driver;
 
 namespace BuzzMe.Infrastructure.IntegrationTests.Reminders;
 
@@ -17,7 +21,7 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
 
     public async Task InitializeAsync()
     {
-        _repository = new ReminderRepository(fixture.Context);
+        _repository = new ReminderRepository(fixture.Context, new MongoOutboxWriter(fixture.Context, new TestClock(Now)));
         await new CreateReminderIndexes(fixture.Context).ApplyAsync(CancellationToken.None);
     }
 
@@ -80,7 +84,8 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
         var reminder = NewReminder();
         await _repository.AddAsync(reminder, CancellationToken.None);
 
-        await _repository.MarkDeletedAsync(reminder.Id, Now, CancellationToken.None);
+        reminder.Delete(Now);
+        await _repository.MarkDeletedAsync(reminder, CancellationToken.None);
         var reloaded = await _repository.GetByIdAsync(reminder.Id, CancellationToken.None);
         var reloadedIncludingDeleted = await _repository.GetByIdIncludingDeletedAsync(reminder.Id, CancellationToken.None);
 
@@ -94,9 +99,11 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
     {
         var reminder = NewReminder();
         await _repository.AddAsync(reminder, CancellationToken.None);
-        await _repository.MarkDeletedAsync(reminder.Id, Now, CancellationToken.None);
+        reminder.Delete(Now);
+        await _repository.MarkDeletedAsync(reminder, CancellationToken.None);
 
-        await _repository.MarkDeletedAsync(reminder.Id, Now, CancellationToken.None);
+        reminder.Delete(Now);
+        await _repository.MarkDeletedAsync(reminder, CancellationToken.None);
         var reloadedIncludingDeleted = await _repository.GetByIdIncludingDeletedAsync(reminder.Id, CancellationToken.None);
 
         Assert.NotNull(reloadedIncludingDeleted);
@@ -110,7 +117,8 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
         var reminder = NewReminder(boardId, "Soon to be deleted");
         await _repository.AddAsync(reminder, CancellationToken.None);
 
-        await _repository.MarkDeletedAsync(reminder.Id, Now, CancellationToken.None);
+        reminder.Delete(Now);
+        await _repository.MarkDeletedAsync(reminder, CancellationToken.None);
         var results = await _repository.ListByBoardAsync(boardId, afterId: null, limit: 20, CancellationToken.None);
 
         Assert.Empty(results);
@@ -162,5 +170,26 @@ public sealed class ReminderRepositoryTests(MongoIntegrationTestFixture fixture)
 
         staleCopy.Update(new ReminderTitle("Something else"), staleCopy.Schedule, staleCopy.NotifyPreset, Now.AddDays(2));
         await Assert.ThrowsAsync<ConcurrencyConflictException>(() => _repository.UpdateAsync(staleCopy, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task MarkDeletedAsync_WritesReminderDeletedToTheOutboxInTheSameTransaction()
+    {
+        // DEVELOPMENT_GUIDE.md §7 — the DeletedAt update and the outbox row for
+        // ReminderDeleted commit together (Sprint 17).
+        var reminder = NewReminder();
+        await _repository.AddAsync(reminder, CancellationToken.None);
+        reminder.Delete(Now);
+        var raisedEventId = reminder.DomainEvents.OfType<ReminderDeleted>().Single().EventId;
+
+        await _repository.MarkDeletedAsync(reminder, CancellationToken.None);
+
+        var outboxRow = await fixture.Context.Outbox
+            .Find(Builders<OutboxMessage>.Filter.Eq(d => d.Id, raisedEventId))
+            .FirstOrDefaultAsync();
+        Assert.NotNull(outboxRow);
+        Assert.Equal(nameof(ReminderDeleted), outboxRow.EventType);
+        Assert.Null(outboxRow.ProcessedAt);
+        Assert.Empty(reminder.DomainEvents);
     }
 }

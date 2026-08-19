@@ -86,6 +86,24 @@ public sealed class Buzz : AggregateRoot<BuzzId>
         Raise(new BuzzDeliveryFailed(Guid.CreateVersion7(), failedAt, Id, OccurrenceId, RecipientUserId));
     }
 
+    /// <summary>
+    /// IMPLEMENTATION_SPEC.md §4/§7's "cancel pending Buzzes" policy, at the Buzz's own
+    /// end. "Pending" means <see cref="BuzzStatus.Scheduled"/> or
+    /// <see cref="BuzzStatus.Generated"/> (claimed, delivery attempt in flight) — anything
+    /// else (already Delivered/Failed/Cancelled, or the still-unreachable Retried/
+    /// Exhausted/Seen/Dismissed) is treated as a no-op, matching IMPLEMENTATION_SPEC.md
+    /// §4's own stated rule: "cancelling an already-cancelled or already-delivered Buzz is
+    /// a no-op."
+    /// </summary>
+    public void Cancel(DateTimeOffset cancelledAt)
+    {
+        if (Status is not (BuzzStatus.Scheduled or BuzzStatus.Generated))
+            return;
+
+        Status = BuzzStatus.Cancelled;
+        Raise(new BuzzCancelled(Guid.CreateVersion7(), cancelledAt, Id, OccurrenceId, RecipientUserId));
+    }
+
     /// <summary>Same defensive-invariant reasoning as Invitation.EnsurePending (Sprint 5) — a Buzz can never be moved out of a status it isn't currently in.</summary>
     private void EnsureStatus(BuzzStatus expected)
     {

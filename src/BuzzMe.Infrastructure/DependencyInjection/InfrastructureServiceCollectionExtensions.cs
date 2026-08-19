@@ -1,10 +1,13 @@
 using BuzzMe.Application.Abstractions;
+using BuzzMe.Application.Policies;
 using BuzzMe.Domain.Auth;
 using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Buzzes;
 using BuzzMe.Domain.Invitations;
 using BuzzMe.Domain.Occurrences;
+using BuzzMe.Domain.Occurrences.Events;
 using BuzzMe.Domain.Reminders;
+using BuzzMe.Domain.Reminders.Events;
 using BuzzMe.Domain.SeedWork;
 using BuzzMe.Domain.Users;
 using BuzzMe.Infrastructure.Ids;
@@ -63,6 +66,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IMongoMigration, CreateUserIndexes>();
         services.AddSingleton<IMongoMigration, CreateUserPasswordResetIndex>();
         services.AddSingleton<IMongoMigration, CreateRefreshTokenIndexes>();
+        services.AddSingleton<IMongoMigration, CreateOutboxIndexes>();
 
         // Default to logging instead of delivering until a real provider is wired up —
         // see NullPushNotificationSender/NullEmailSender/NullSmsSender for why this is
@@ -75,7 +79,27 @@ public static class InfrastructureServiceCollectionExtensions
         // SPRINT_6_REPORT.md §5 for the plan to replace this with real dispatch.
         services.AddSingleton<INotificationDispatcher, LoggingNotificationDispatcher>();
 
+        services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
+        services.AddPolicies();
+
         services.AddRepositories();
+
+        return services;
+    }
+
+    /// <summary>
+    /// The designated home for every `IPolicy&lt;TEvent&gt;` registration (Sprint 17) — one
+    /// entry per (Policy class, event type) pair it handles, mapped to the same scoped
+    /// instance so a Policy implementing more than one `IPolicy&lt;TEvent&gt;` isn't
+    /// constructed twice within a dispatch.
+    /// </summary>
+    private static IServiceCollection AddPolicies(this IServiceCollection services)
+    {
+        services.AddScoped<CancelBuzzesOnOccurrenceResolvedPolicy>();
+        services.AddScoped<IPolicy<OccurrenceCompleted>>(sp => sp.GetRequiredService<CancelBuzzesOnOccurrenceResolvedPolicy>());
+        services.AddScoped<IPolicy<OccurrenceDismissed>>(sp => sp.GetRequiredService<CancelBuzzesOnOccurrenceResolvedPolicy>());
+
+        services.AddScoped<IPolicy<ReminderDeleted>, CancelBuzzesOnReminderDeletedPolicy>();
 
         return services;
     }

@@ -2,12 +2,13 @@ using BuzzMe.Domain.Boards;
 using BuzzMe.Domain.Reminders;
 using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Mongo.Reminders.Mappers;
+using BuzzMe.Infrastructure.Persistence.Outbox;
 using MongoDB.Driver;
 
 namespace BuzzMe.Infrastructure.Persistence.Mongo.Reminders;
 
 /// <summary>A hand-written repository for exactly the Reminder aggregate — DEVELOPMENT_GUIDE.md §3's "no generic repository."</summary>
-public sealed class ReminderRepository(MongoContext context) : IReminderRepository
+public sealed class ReminderRepository(MongoContext context, IOutboxWriter outboxWriter) : IReminderRepository
 {
     private IMongoCollection<ReminderDocument> Collection => context.Database.GetCollection<ReminderDocument>("reminders");
 
@@ -53,12 +54,33 @@ public sealed class ReminderRepository(MongoContext context) : IReminderReposito
         return documents.Select(ReminderMapper.ToDomain).ToList();
     }
 
-    public async Task MarkDeletedAsync(ReminderId id, DateTimeOffset deletedAt, CancellationToken cancellationToken)
+    /// <summary>
+    /// DEVELOPMENT_GUIDE.md §7 — the DeletedAt update and the outbox write for
+    /// <paramref name="reminder"/>'s own raised events (ReminderDeleted) commit together,
+    /// in one MongoDB session, or not at all. The first write path in this codebase to
+    /// actually need a multi-document transaction — every prior write touches exactly one
+    /// collection.
+    /// </summary>
+    public async Task MarkDeletedAsync(Reminder reminder, CancellationToken cancellationToken)
     {
-        var filter = Builders<ReminderDocument>.Filter.Eq(d => d.Id, id.Value);
-        var update = Builders<ReminderDocument>.Update.Set(d => d.DeletedAt, deletedAt);
+        using var session = await context.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
+        session.StartTransaction();
+        try
+        {
+            var filter = Builders<ReminderDocument>.Filter.Eq(d => d.Id, reminder.Id.Value);
+            var update = Builders<ReminderDocument>.Update.Set(d => d.DeletedAt, reminder.DeletedAt);
+            await Collection.UpdateOneAsync(session, filter, update, cancellationToken: cancellationToken);
 
-        await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+            await outboxWriter.WriteAsync(session, reminder.DomainEvents, cancellationToken);
+
+            await session.CommitTransactionAsync(cancellationToken);
+            reminder.ClearDomainEvents();
+        }
+        catch when (session.IsInTransaction)
+        {
+            await session.AbortTransactionAsync(cancellationToken);
+            throw;
+        }
     }
 
     public async Task UpdateAsync(Reminder reminder, CancellationToken cancellationToken)

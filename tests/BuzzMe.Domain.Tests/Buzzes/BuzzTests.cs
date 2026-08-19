@@ -131,6 +131,55 @@ public sealed class BuzzTests
         Assert.Throws<InvalidOperationException>(() => buzz.MarkFailed(Now));
     }
 
+    [Fact]
+    public void Cancel_FromScheduled_TransitionsToCancelledAndRaisesBuzzCancelled()
+    {
+        var buzz = NewScheduledBuzz();
+
+        buzz.Cancel(Now);
+
+        Assert.Equal(BuzzStatus.Cancelled, buzz.Status);
+        var raised = Assert.Single(buzz.DomainEvents.OfType<BuzzCancelled>());
+        Assert.Equal(buzz.Id, raised.BuzzId);
+        Assert.Equal(buzz.OccurrenceId, raised.OccurrenceId);
+        Assert.Equal(buzz.RecipientUserId, raised.RecipientUserId);
+    }
+
+    [Fact]
+    public void Cancel_FromGenerated_TransitionsToCancelled()
+    {
+        var buzz = NewScheduledBuzz();
+        buzz.ClaimForProcessing();
+
+        buzz.Cancel(Now);
+
+        Assert.Equal(BuzzStatus.Cancelled, buzz.Status);
+    }
+
+    [Fact]
+    public void Cancel_WhenAlreadyDelivered_IsANoOp()
+    {
+        var buzz = NewScheduledBuzz();
+        buzz.ClaimForProcessing();
+        buzz.MarkDelivered(Now);
+
+        buzz.Cancel(Now);
+
+        Assert.Equal(BuzzStatus.Delivered, buzz.Status);
+        Assert.Empty(buzz.DomainEvents.OfType<BuzzCancelled>());
+    }
+
+    [Fact]
+    public void Cancel_WhenAlreadyCancelled_IsIdempotent()
+    {
+        var buzz = NewScheduledBuzz();
+        buzz.Cancel(Now);
+
+        buzz.Cancel(Now.AddMinutes(1));
+
+        Assert.Single(buzz.DomainEvents.OfType<BuzzCancelled>());
+    }
+
     [Theory]
     [InlineData("scheduled", BuzzStatus.Scheduled)]
     [InlineData("generated", BuzzStatus.Generated)]
@@ -140,6 +189,7 @@ public sealed class BuzzTests
     [InlineData("exhausted", BuzzStatus.Exhausted)]
     [InlineData("seen", BuzzStatus.Seen)]
     [InlineData("dismissed", BuzzStatus.Dismissed)]
+    [InlineData("cancelled", BuzzStatus.Cancelled)]
     public void BuzzStatusCodes_RoundTripEveryValue(string code, BuzzStatus expected)
     {
         Assert.True(BuzzStatusCodes.TryParse(code, out var parsed));

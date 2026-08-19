@@ -18,7 +18,10 @@ public sealed class BuzzMeApiFactory : WebApplicationFactory<Program>, IAsyncLif
     public const string Issuer = "buzzme-api";
     public const string Audience = "buzzme-clients";
 
-    private readonly MongoDbContainer _mongoContainer = new MongoDbBuilder("mongo:7.0").Build();
+    // WithReplicaSet() is required for MongoDB multi-document transactions
+    // (DEVELOPMENT_GUIDE.md §7's transactional outbox) — see MongoIntegrationTestFixture's
+    // own identical comment.
+    private readonly MongoDbContainer _mongoContainer = new MongoDbBuilder("mongo:7.0").WithReplicaSet().Build();
 
     public Task InitializeAsync() => _mongoContainer.StartAsync();
 

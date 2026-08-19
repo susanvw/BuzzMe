@@ -13,7 +13,10 @@ namespace BuzzMe.Infrastructure.IntegrationTests;
 /// </summary>
 public sealed class MongoIntegrationTestFixture : IAsyncLifetime
 {
-    private readonly MongoDbContainer _container = new MongoDbBuilder("mongo:7.0").Build();
+    // WithReplicaSet() is required for MongoDB multi-document transactions
+    // (DEVELOPMENT_GUIDE.md §7's transactional outbox) — a plain standalone mongod
+    // rejects them with "Transaction numbers are only allowed on a replica set member."
+    private readonly MongoDbContainer _container = new MongoDbBuilder("mongo:7.0").WithReplicaSet().Build();
 
     public MongoContext Context { get; private set; } = null!;
 

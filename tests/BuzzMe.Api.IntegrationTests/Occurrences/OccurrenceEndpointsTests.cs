@@ -66,7 +66,9 @@ public sealed class OccurrenceEndpointsTests : IClassFixture<BuzzMeApiFactory>
     {
         using var scope = _factory.Services.CreateScope();
         var reminderRepository = scope.ServiceProvider.GetRequiredService<IReminderRepository>();
-        await reminderRepository.MarkDeletedAsync(new ReminderId(reminderId), DateTimeOffset.UtcNow, CancellationToken.None);
+        var reminder = await reminderRepository.GetByIdAsync(new ReminderId(reminderId), CancellationToken.None);
+        reminder!.Delete(DateTimeOffset.UtcNow);
+        await reminderRepository.MarkDeletedAsync(reminder, CancellationToken.None);
     }
 
     [Fact]

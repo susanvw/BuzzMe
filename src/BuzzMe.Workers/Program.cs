@@ -26,5 +26,6 @@ using (var scope = host.Services.CreateScope())
 // row of DEVELOPMENT_GUIDE.md §7's process table, as each is implemented. See
 // REPOSITORY_BOOTSTRAP.md's "First Implementation Order."
 builder.Services.AddHostedService<BuzzDeliveryWorker>();
+builder.Services.AddHostedService<OutboxDispatcherJob>();
 
 host.Run();

@@ -160,7 +160,7 @@ public sealed class ReminderApplicationService(
             return Result.Success();
 
         reminder.Delete(clock.UtcNow);
-        await reminderRepository.MarkDeletedAsync(reminder.Id, reminder.DeletedAt!.Value, cancellationToken);
+        await reminderRepository.MarkDeletedAsync(reminder, cancellationToken);
 
         return Result.Success();
     }

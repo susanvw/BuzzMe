@@ -2,12 +2,13 @@ using BuzzMe.Domain.Occurrences;
 using BuzzMe.Domain.Reminders;
 using BuzzMe.Domain.SeedWork;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences.Mappers;
+using BuzzMe.Infrastructure.Persistence.Outbox;
 using MongoDB.Driver;
 
 namespace BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
 
 /// <summary>A hand-written repository for exactly the Occurrence aggregate — DEVELOPMENT_GUIDE.md §3's "no generic repository."</summary>
-public sealed class OccurrenceRepository(MongoContext context) : IOccurrenceRepository
+public sealed class OccurrenceRepository(MongoContext context, IOutboxWriter outboxWriter) : IOccurrenceRepository
 {
     private IMongoCollection<OccurrenceDocument> Collection => context.Database.GetCollection<OccurrenceDocument>("occurrences");
 
@@ -62,28 +63,50 @@ public sealed class OccurrenceRepository(MongoContext context) : IOccurrenceRepo
         return document is null ? null : OccurrenceMapper.ToDomain(document);
     }
 
+    /// <summary>
+    /// DEVELOPMENT_GUIDE.md §7 — the version-checked replace and the outbox write for
+    /// <paramref name="occurrence"/>'s own raised events (OccurrenceCompleted/Dismissed/
+    /// Undone) commit together, in one MongoDB session, or not at all. A version conflict
+    /// aborts the transaction before anything reaches the outbox — a losing race must never
+    /// leave a stray "already done by X" event behind for a change that was itself rejected.
+    /// </summary>
     public async Task UpdateAsync(Occurrence occurrence, CancellationToken cancellationToken)
     {
-        var filter = Builders<OccurrenceDocument>.Filter.Eq(d => d.Id, occurrence.Id.Value)
-            & Builders<OccurrenceDocument>.Filter.Eq(d => d.Version, occurrence.Version);
-
-        var replacement = new OccurrenceDocument
+        using var session = await context.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
+        session.StartTransaction();
+        try
         {
-            Id = occurrence.Id.Value,
-            ReminderId = occurrence.ReminderId.Value,
-            DueAt = occurrence.DueAt,
-            Status = occurrence.Status.ToCode(),
-            GeneratedAt = occurrence.GeneratedAt,
-            ResolvedByUserId = occurrence.ResolvedByUserId,
-            ResolvedAt = occurrence.ResolvedAt,
-            Version = occurrence.Version + 1,
-        };
+            var filter = Builders<OccurrenceDocument>.Filter.Eq(d => d.Id, occurrence.Id.Value)
+                & Builders<OccurrenceDocument>.Filter.Eq(d => d.Version, occurrence.Version);
 
-        var result = await Collection.ReplaceOneAsync(filter, replacement, cancellationToken: cancellationToken);
-        if (result.MatchedCount == 0)
+            var replacement = new OccurrenceDocument
+            {
+                Id = occurrence.Id.Value,
+                ReminderId = occurrence.ReminderId.Value,
+                DueAt = occurrence.DueAt,
+                Status = occurrence.Status.ToCode(),
+                GeneratedAt = occurrence.GeneratedAt,
+                ResolvedByUserId = occurrence.ResolvedByUserId,
+                ResolvedAt = occurrence.ResolvedAt,
+                Version = occurrence.Version + 1,
+            };
+
+            var result = await Collection.ReplaceOneAsync(session, filter, replacement, cancellationToken: cancellationToken);
+            if (result.MatchedCount == 0)
+            {
+                throw new ConcurrencyConflictException(
+                    $"Occurrence {occurrence.Id} was modified by someone else since it was loaded (expected version {occurrence.Version}).");
+            }
+
+            await outboxWriter.WriteAsync(session, occurrence.DomainEvents, cancellationToken);
+
+            await session.CommitTransactionAsync(cancellationToken);
+            occurrence.ClearDomainEvents();
+        }
+        catch when (session.IsInTransaction)
         {
-            throw new ConcurrencyConflictException(
-                $"Occurrence {occurrence.Id} was modified by someone else since it was loaded (expected version {occurrence.Version}).");
+            await session.AbortTransactionAsync(cancellationToken);
+            throw;
         }
     }
 }

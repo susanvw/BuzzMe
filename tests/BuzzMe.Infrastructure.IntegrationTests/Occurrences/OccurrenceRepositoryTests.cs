@@ -1,8 +1,11 @@
 using BuzzMe.Domain.Occurrences;
+using BuzzMe.Domain.Occurrences.Events;
 using BuzzMe.Domain.Reminders;
 using BuzzMe.Domain.SeedWork;
+using BuzzMe.Infrastructure.IntegrationTests.Workers.TestDoubles;
 using BuzzMe.Infrastructure.Persistence.Migrations.Steps;
 using BuzzMe.Infrastructure.Persistence.Mongo.Occurrences;
+using BuzzMe.Infrastructure.Persistence.Outbox;
 using MongoDB.Driver;
 
 namespace BuzzMe.Infrastructure.IntegrationTests.Occurrences;
@@ -18,7 +21,7 @@ public sealed class OccurrenceRepositoryTests(MongoIntegrationTestFixture fixtur
 
     public async Task InitializeAsync()
     {
-        _repository = new OccurrenceRepository(fixture.Context);
+        _repository = new OccurrenceRepository(fixture.Context, new MongoOutboxWriter(fixture.Context, new TestClock(Now)));
         await new CreateOccurrenceIndexes(fixture.Context).ApplyAsync(CancellationToken.None);
     }
 
@@ -149,5 +152,49 @@ public sealed class OccurrenceRepositoryTests(MongoIntegrationTestFixture fixtur
 
         staleCopy.Dismiss(Guid.CreateVersion7(), Now);
         await Assert.ThrowsAsync<ConcurrencyConflictException>(() => _repository.UpdateAsync(staleCopy, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WritesOccurrenceCompletedToTheOutboxInTheSameTransaction()
+    {
+        // DEVELOPMENT_GUIDE.md §7 — the version-checked replace and the outbox row for
+        // OccurrenceCompleted commit together (Sprint 17).
+        var occurrence = NewOccurrence(new ReminderId(Guid.CreateVersion7()), Now.AddDays(12));
+        await _repository.AddAsync(occurrence, CancellationToken.None);
+        occurrence.Complete(Guid.CreateVersion7(), Now);
+        var raisedEventId = occurrence.DomainEvents.OfType<OccurrenceCompleted>().Single().EventId;
+
+        await _repository.UpdateAsync(occurrence, CancellationToken.None);
+
+        var outboxRow = await fixture.Context.Outbox
+            .Find(Builders<OutboxMessage>.Filter.Eq(d => d.Id, raisedEventId))
+            .FirstOrDefaultAsync();
+        Assert.NotNull(outboxRow);
+        Assert.Equal(nameof(OccurrenceCompleted), outboxRow.EventType);
+        Assert.Null(outboxRow.ProcessedAt);
+        Assert.Empty(occurrence.DomainEvents);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_OnVersionConflict_LeavesNoOutboxRowBehind()
+    {
+        // A losing race must never leave a stray event behind for a change that was itself
+        // rejected — the transaction that would have written it is aborted, not partially
+        // applied.
+        var occurrence = NewOccurrence(new ReminderId(Guid.CreateVersion7()), Now.AddDays(13));
+        await _repository.AddAsync(occurrence, CancellationToken.None);
+        var staleCopy = await _repository.GetByIdAsync(occurrence.Id, CancellationToken.None);
+        Assert.NotNull(staleCopy);
+        occurrence.Complete(Guid.CreateVersion7(), Now);
+        await _repository.UpdateAsync(occurrence, CancellationToken.None);
+
+        staleCopy.Dismiss(Guid.CreateVersion7(), Now);
+        var rejectedEventId = staleCopy.DomainEvents.OfType<OccurrenceDismissed>().Single().EventId;
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(() => _repository.UpdateAsync(staleCopy, CancellationToken.None));
+
+        var outboxRow = await fixture.Context.Outbox
+            .Find(Builders<OutboxMessage>.Filter.Eq(d => d.Id, rejectedEventId))
+            .FirstOrDefaultAsync();
+        Assert.Null(outboxRow);
     }
 }
